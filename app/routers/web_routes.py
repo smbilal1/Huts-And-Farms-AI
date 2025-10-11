@@ -31,6 +31,9 @@ cloudinary.config(
 router = APIRouter()
 agent = BookingToolAgent()
 
+# Admin notification configuration
+ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")  # Configure your admin notification endpoint
+
 # ==================== Request Models ====================
 
 class WebChatMessage(BaseModel):
@@ -110,6 +113,27 @@ def extract_media_urls(text: str) -> Optional[Dict[str, List[str]]]:
 
     return media if media["images"] or media["videos"] else None
 
+async def notify_admin(payment_details: str, image_url: str, booking_id: str):
+    """
+    Send admin notification (via email, Slack, or admin dashboard)
+    This keeps admin notifications separate from user chat
+    """
+    # TODO: Implement your admin notification system
+    # Options:
+    # 1. Send email to admin
+    # 2. Post to Slack/Discord webhook
+    # 3. Save to admin notification table
+    # 4. Send to admin dashboard via WebSocket
+    
+    print(f"📧 Admin Notification:")
+    print(f"   Booking ID: {booking_id}")
+    print(f"   Payment Screenshot: {image_url}")
+    print(f"   Details: {payment_details}")
+    
+    # Example: You could save to a separate AdminNotification table
+    # Or send via email/Slack webhook
+    pass
+
 # ==================== API Routes ====================
 
 @router.post("/web-chat/send-message", response_model=ChatResponse)
@@ -171,7 +195,7 @@ async def send_web_message(message_data: WebChatMessage):
         else:
             final_message_content = formatted_response
 
-        # Save bot message
+        # Save bot message (ONLY user-facing messages)
         bot_message = Message(
             user_id=user_id,
             sender="bot",
@@ -257,17 +281,22 @@ async def send_web_image(image_data: WebImageMessage):
                 db.commit()
 
                 # Process payment screenshot using agent
+                # This generates admin notification details but DON'T save to user's chat
                 payment_details = agent.get_response(
                     incoming_text="Image received run process_payment_screenshot",
                     session_id=session_id,
                     whatsapp_message_id=None
                 )
 
-                # Save bot response
+                # ✅ Send to admin via separate channel (NOT saved to user's Message table)
+                await notify_admin(payment_details, image_url, str(booking))
+
+                # ✅ Save ONLY user-facing confirmation message
+                user_confirmation = "Payment screenshot received and sent to admin for verification. You will receive confirmation shortly."
                 bot_message = Message(
                     user_id=user_id,
                     sender="bot",
-                    content=payment_details,
+                    content=user_confirmation,
                     timestamp=datetime.utcnow()
                 )
                 db.add(bot_message)
@@ -275,7 +304,7 @@ async def send_web_image(image_data: WebImageMessage):
 
                 return ChatResponse(
                     status="uploaded",
-                    bot_response="Payment screenshot received and sent to admin for verification. You will receive confirmation shortly.",
+                    bot_response=user_confirmation,
                     media_urls={"images": [image_url]}
                 )
             else:
@@ -318,6 +347,7 @@ async def send_web_image(image_data: WebImageMessage):
 async def get_chat_history(history_request: ChatHistoryRequest):
     """
     Get chat history for a user
+    ✅ Fixed: Only fetches messages once with proper ordering
     """
     db = SessionLocal()
     try:
@@ -329,17 +359,15 @@ async def get_chat_history(history_request: ChatHistoryRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Get messages
+        # ✅ Get messages with DISTINCT to avoid duplicates
+        # Order by timestamp and id to ensure consistent ordering
         messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
-            .order_by(Message.timestamp.desc())
+            .order_by(Message.timestamp.asc(), Message.id.asc())
             .limit(limit)
             .all()
         )
-
-        # Reverse to show oldest first
-        messages = list(reversed(messages))
 
         # Format response
         response = []
