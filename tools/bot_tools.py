@@ -998,7 +998,6 @@ def introduction_message() -> str:
     """
     return message
 
-    return message
 
 
 
