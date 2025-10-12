@@ -155,16 +155,16 @@ async def send_web_message(message_data: WebChatMessage):
         incoming_text = message_data.message
         
         # Save user message (no WhatsApp ID for web)
-        user_message = Message(
-            user_id=user_id,
-            sender="user",
-            content=incoming_text,
-            whatsapp_message_id=None,  # Not applicable for web
-            timestamp=datetime.utcnow()
-        )
-        db.add(user_message)
-        db.commit()
-        db.refresh(user_message)
+        # user_message = Message(
+        #     user_id=user_id,
+        #     sender="user",
+        #     content=incoming_text,
+        #     whatsapp_message_id=None,  # Not applicable for web
+        #     timestamp=datetime.utcnow()
+        # )
+        # db.add(user_message)
+        # db.commit()
+        # db.refresh(user_message)
 
         # Get bot response
         agent_response = agent.get_response(
@@ -347,7 +347,6 @@ async def send_web_image(image_data: WebImageMessage):
 async def get_chat_history(history_request: ChatHistoryRequest):
     """
     Get chat history for a user
-    ✅ Fixed: Only fetches messages once with proper ordering
     """
     db = SessionLocal()
     try:
@@ -359,15 +358,17 @@ async def get_chat_history(history_request: ChatHistoryRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # ✅ Get messages with DISTINCT to avoid duplicates
-        # Order by timestamp and id to ensure consistent ordering
+        # Get messages
         messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
-            .order_by(Message.timestamp.asc(), Message.id.asc())
+            .order_by(Message.timestamp.desc())
             .limit(limit)
             .all()
         )
+
+        # Reverse to show oldest first
+        messages = list(reversed(messages))
 
         # Format response
         response = []
