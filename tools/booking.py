@@ -28,22 +28,22 @@ import time
 # Configuration
 EASYPAISA_NUMBER = "03155699929"
 VERIFICATION_WHATSAPP = "923155699929"
-WEB_ADMIN_USER_ID = "216d5ab6-e8ef-4a5c-8b7c-45be19b28334"
+WEB_ADMIN_USER_ID = uuid.UUID("216d5ab6-e8ef-4a5c-8b7c-45be19b28334")  # UUID object, not string
 WHATSAPP_TOKEN = os.getenv("META_ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-def get_or_create_user(wa_id: str, db) -> str:
+def get_or_create_user(wa_id: str, db) -> uuid.UUID:
     user = db.query(User).filter_by(phone_number=wa_id).first()
     if user:
         return user.user_id
-    user_id = str(uuid.uuid4())
-    new_user = User(user_id=user_id, phone_number=wa_id,created_at=datetime.utcnow())
+    user_id = uuid.uuid4()  # UUID object, not string
+    new_user = User(user_id=user_id, phone_number=wa_id, created_at=datetime.utcnow())
     db.add(new_user)
     db.commit()
     return user_id
 
-def get_or_create_admin_session(user_id: str, db) -> str:
+def get_or_create_admin_session(user_id: uuid.UUID, db) -> str:
     """Get or create session for admin user, refreshing if expired"""
     session = db.query(Session).filter_by(user_id=user_id).first()
     
@@ -64,7 +64,7 @@ def get_or_create_admin_session(user_id: str, db) -> str:
     session_id = str(uuid.uuid4())
     new_session = Session(
         id=session_id, 
-        user_id=user_id,
+        user_id=user_id,  # UUID object
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
@@ -72,14 +72,14 @@ def get_or_create_admin_session(user_id: str, db) -> str:
     db.commit()
     return session_id
 
-def send_whatsapp_message_sync(recipient_number: str, message: str, user_id: str = None, save_to_db: bool = True) -> dict:
+def send_whatsapp_message_sync(recipient_number: str, message: str, user_id: uuid.UUID = None, save_to_db: bool = True) -> dict:
     """
     Synchronous WhatsApp message sender with database integration
     
     Args:
         recipient_number: Phone number to send message to
         message: Message content
-        user_id: User ID for database record (required if save_to_db=True)
+        user_id: User ID for database record (UUID object, required if save_to_db=True)
         save_to_db: Whether to save message to database
         
     Returns:
@@ -129,12 +129,12 @@ def send_whatsapp_message_sync(recipient_number: str, message: str, user_id: str
         print(f"❌ Error sending WhatsApp message: {e}")
         return {"success": False, "whatsapp_message_id": None, "message_db_id": None}
 
-def save_web_message_to_db(user_id: str, content: str, sender: str = "bot") -> int:
+def save_web_message_to_db(user_id: uuid.UUID, content: str, sender: str = "bot") -> int:
     """
     Save web message to database (no WhatsApp ID)
     
     Args:
-        user_id: User ID
+        user_id: User ID (UUID object)
         content: Message content
         sender: "bot" or "user"
         
@@ -154,22 +154,24 @@ def save_web_message_to_db(user_id: str, content: str, sender: str = "bot") -> i
         db.add(message)
         db.commit()
         
-        print(f"✅ Web message saved to DB - ID: {message.id}, Sender: {sender}")
+        print(f"✅ Web message saved to DB - ID: {message.id}, Sender: {sender}, User: {user_id}")
         return message.id
         
     except Exception as e:
         db.rollback()
         print(f"❌ Error saving web message to database: {e}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
         return None
     finally:
         db.close()
 
-def save_bot_message_to_db(user_id: str, content: str, whatsapp_message_id: str) -> int:
+def save_bot_message_to_db(user_id: uuid.UUID, content: str, whatsapp_message_id: str) -> int:
     """
     Save bot message to database
     
     Args:
-        user_id: User ID from session
+        user_id: User ID from session (UUID object)
         content: Message content
         whatsapp_message_id: WhatsApp's message ID
         
@@ -192,7 +194,7 @@ def save_bot_message_to_db(user_id: str, content: str, whatsapp_message_id: str)
         db.add(message)
         db.commit()
         
-        print(f"✅ Bot message saved to DB - ID: {message.id}, WhatsApp ID: {whatsapp_message_id}")
+        print(f"✅ Bot message saved to DB - ID: {message.id}, WhatsApp ID: {whatsapp_message_id}, User: {user_id}")
         return message.id
         
     except Exception as e:

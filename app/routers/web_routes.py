@@ -33,7 +33,7 @@ router = APIRouter()
 agent = BookingToolAgent()
 admin_agent = AdminAgent()
 
-WEB_ADMIN_USER_ID = "216d5ab6-e8ef-4a5c-8b7c-45be19b28334"
+WEB_ADMIN_USER_ID = uuid.UUID("216d5ab6-e8ef-4a5c-8b7c-45be19b28334")  # UUID object, not string
 
 # Admin notification configuration
 ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")  # Configure your admin notification endpoint
@@ -70,14 +70,20 @@ class ChatResponse(BaseModel):
 
 # ==================== Helper Functions ====================
 
-def get_or_create_user_web(user_id: str, db) -> str:
+def get_or_create_user_web(user_id: str, db) -> uuid.UUID:
     """Get user by user_id (assuming user is already authenticated)"""
-    user = db.query(User).filter_by(user_id=user_id).first()
+    # Convert string to UUID for database query
+    try:
+        user_id_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id format")
+    
+    user = db.query(User).filter_by(user_id=user_id_uuid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user.user_id
 
-def get_or_create_session(user_id: str, db) -> str:
+def get_or_create_session(user_id: uuid.UUID, db) -> str:
     """Get or create session for user"""
     session = db.query(SessionModel).filter_by(user_id=user_id).first()
     if session:
@@ -140,7 +146,7 @@ async def notify_admin(payment_details: str, image_url: str, booking_id: str):
 
 async def handle_admin_message(
     incoming_text: str,
-    admin_user_id: str,
+    admin_user_id: uuid.UUID,
     db
 ) -> ChatResponse:
     """
