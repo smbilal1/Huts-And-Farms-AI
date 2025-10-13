@@ -749,16 +749,16 @@ class BookingToolAgent:
         chat_history = get_chat_history_normal(user_id=user_id)
         print(f"Chat history: {chat_history}")
 
-        
-        db.add(Message(
-            user_id=user_id,
-            sender="user",
-            content=incoming_text,
-            # query_embedding = embedding_user,  # Get embedding for user message
-            whatsapp_message_id = whatsapp_message_id,
-            timestamp=datetime.utcnow()
-        ))
-        db.commit()
+        if incoming_text != "Image received run process_payment_screenshot":
+            db.add(Message(
+                user_id=user_id,
+                sender="user",
+                content=incoming_text,
+                # query_embedding = embedding_user,  # Get embedding for user message
+                whatsapp_message_id = whatsapp_message_id,
+                timestamp=datetime.utcnow()
+            ))
+            db.commit()
 
         cnic = session.user.cnic if session else "None"
         name = session.user.name if session else "None"

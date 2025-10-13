@@ -200,6 +200,7 @@ async def send_web_message(message_data: WebChatMessage):
             user_id=user_id,
             sender="bot",
             content=final_message_content,
+            
             whatsapp_message_id=None,  # Not applicable for web
             timestamp=datetime.utcnow()
         )
