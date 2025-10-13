@@ -125,24 +125,31 @@ def extract_media_urls(text: str) -> Optional[Dict[str, List[str]]]:
 
 async def notify_admin(payment_details: str, image_url: str, booking_id: str):
     """
-    Send admin notification (via email, Slack, or admin dashboard)
-    This keeps admin notifications separate from user chat
+    Send admin notification by saving to admin's chat
     """
-    # TODO: Implement your admin notification system
-    # Options:
-    # 1. Send email to admin
-    # 2. Post to Slack/Discord webhook
-    # 3. Save to admin notification table
-    # 4. Send to admin dashboard via WebSocket
+    from tools.booking import save_web_message_to_db
     
-    print(f"📧 Admin Notification:")
-    print(f"   Booking ID: {booking_id}")
-    print(f"   Payment Screenshot: {image_url}")
-    print(f"   Details: {payment_details}")
-    
-    # Example: You could save to a separate AdminNotification table
-    # Or send via email/Slack webhook
-    pass
+    try:
+        print(f"📧 Sending admin notification:")
+        print(f"   Booking ID: {booking_id}")
+        print(f"   Payment Screenshot: {image_url}")
+        
+        # Save message to admin's conversation
+        message_id = save_web_message_to_db(
+            user_id=WEB_ADMIN_USER_ID,
+            content=payment_details,
+            sender="bot"
+        )
+        
+        if message_id:
+            print(f"✅ Admin notification saved - Message ID: {message_id}")
+        else:
+            print(f"❌ Failed to save admin notification")
+            
+    except Exception as e:
+        print(f"❌ Error sending admin notification: {e}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
 
 async def handle_admin_message(
     incoming_text: str,
@@ -159,69 +166,106 @@ async def handle_admin_message(
         
     Returns:
         ChatResponse with status and admin feedback
-        
-    Note: Customer notifications are handled automatically by booking tools
-    (confirm_booking_payment and reject_booking_payment). These tools check
-    if the booking is from web or WhatsApp and send notifications accordingly.
     """
     try:
         # Get or create admin session
         session_id = get_or_create_session(admin_user_id, db)
         print(f"📋 Admin session ID: {session_id}")
         
+        # Save admin's message
+        admin_message = Message(
+            user_id=admin_user_id,
+            sender="admin",
+            content=incoming_text,
+            whatsapp_message_id=None,
+            timestamp=datetime.utcnow()
+        )
+        db.add(admin_message)
+        db.commit()
+        print(f"✅ Admin message saved - ID: {admin_message.id}")
+        
         # Call admin agent to process the command
-        # The admin agent will use booking tools which automatically handle customer notifications
         agent_response = admin_agent.get_response(incoming_text, session_id)
         
         print(f"🤖 Admin agent response: {agent_response}")
         
-        # Extract admin feedback from agent response
+        # Check if admin_bot_answer contains customer notification data
         if isinstance(agent_response, dict):
-            # Check for error
-            if agent_response.get("error"):
-                return ChatResponse(
-                    status="error",
-                    error=agent_response["error"]
-                )
-            
-            # Check if it's a successful booking operation
-            if agent_response.get("success"):
-                # Booking tools already sent notification to customer
-                # Just provide feedback to admin
-                booking_id = agent_response.get("booking_id", "")
-                booking_status = agent_response.get("booking_status", "")
-                is_web = agent_response.get("is_web", False)
-                customer_phone = agent_response.get("customer_phone", "")
+            if agent_response.get("success") and agent_response.get("customer_phone"):
+                # This is a confirmation/rejection that needs to be sent to customer
+                customer_phone = agent_response.get("customer_phone")
+                customer_message = agent_response.get("message", "")
+                customer_user_id = agent_response.get("customer_user_id")
                 
-                if booking_status == "Confirmed":
-                    if is_web:
-                        admin_feedback = f"✅ Booking {booking_id} confirmed! Notification sent to web customer."
-                    else:
-                        admin_feedback = f"✅ Booking {booking_id} confirmed! Notification sent to customer via WhatsApp: {customer_phone}"
-                elif booking_status == "Rejected":
-                    if is_web:
-                        admin_feedback = f"❌ Booking {booking_id} rejected. Notification sent to web customer."
-                    else:
-                        admin_feedback = f"❌ Booking {booking_id} rejected. Notification sent to customer via WhatsApp: {customer_phone}"
+                # Determine if customer is web or WhatsApp user
+                if customer_phone and customer_phone != "Web User":
+                    # WhatsApp customer - send via WhatsApp
+                    from tools.booking import send_whatsapp_message_sync
+                    send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
+                    admin_feedback = f"✅ Confirmation sent to customer via WhatsApp: {customer_phone}"
                 else:
-                    admin_feedback = agent_response.get("message", "Operation completed successfully")
+                    # Web customer - save to their chat
+                    if customer_user_id:
+                        from tools.booking import save_web_message_to_db
+                        save_web_message_to_db(customer_user_id, customer_message, sender="bot")
+                        admin_feedback = f"✅ Confirmation sent to web customer"
+                    else:
+                        admin_feedback = "❌ Could not identify customer to send confirmation"
+                
+                # Save admin feedback to admin's chat
+                admin_bot_message = Message(
+                    user_id=admin_user_id,
+                    sender="bot",
+                    content=admin_feedback,
+                    whatsapp_message_id=None,
+                    timestamp=datetime.utcnow()
+                )
+                db.add(admin_bot_message)
+                db.commit()
                 
                 return ChatResponse(
                     status="success",
-                    bot_response=admin_feedback
+                    bot_response=admin_feedback,
+                    message_id=admin_bot_message.id
                 )
-            
-            # Other dict responses
-            admin_feedback = agent_response.get("message", str(agent_response))
-        else:
-            # String response
-            admin_feedback = str(agent_response)
+            elif agent_response.get("error"):
+                error_msg = agent_response.get("error")
+                
+                # Save error to admin's chat
+                admin_bot_message = Message(
+                    user_id=admin_user_id,
+                    sender="bot",
+                    content=error_msg,
+                    whatsapp_message_id=None,
+                    timestamp=datetime.utcnow()
+                )
+                db.add(admin_bot_message)
+                db.commit()
+                
+                return ChatResponse(
+                    status="error",
+                    error=error_msg,
+                    message_id=admin_bot_message.id
+                )
         
-        print(f"✅ Admin feedback: {admin_feedback}")
+        # Regular admin bot response (not a confirmation/rejection)
+        admin_response_text = str(agent_response)
+        
+        # Save admin bot response
+        admin_bot_message = Message(
+            user_id=admin_user_id,
+            sender="bot",
+            content=admin_response_text,
+            whatsapp_message_id=None,
+            timestamp=datetime.utcnow()
+        )
+        db.add(admin_bot_message)
+        db.commit()
         
         return ChatResponse(
             status="success",
-            bot_response=admin_feedback
+            bot_response=admin_response_text,
+            message_id=admin_bot_message.id
         )
         
     except Exception as e:
@@ -248,7 +292,9 @@ async def send_web_message(message_data: WebChatMessage):
     try:
         # Get user
         user_id = get_or_create_user_web(message_data.user_id, db)
-        print(f"User ID: {user_id}")
+        print(f"User ID: {user_id} (type: {type(user_id)})")
+        print(f"Admin ID: {WEB_ADMIN_USER_ID} (type: {type(WEB_ADMIN_USER_ID)})")
+        print(f"Are they equal? {user_id == WEB_ADMIN_USER_ID}")
         
         incoming_text = message_data.message
         
