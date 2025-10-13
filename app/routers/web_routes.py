@@ -12,6 +12,7 @@ import os
 from dotenv import load_dotenv
 
 from app.agent.booking_agent import BookingToolAgent
+from app.agent.admin_agent import AdminAgent
 from app.database import SessionLocal
 from app.chatbot.models import Session as SessionModel, Message, User
 from app.format_message import formatting
@@ -30,6 +31,9 @@ cloudinary.config(
 
 router = APIRouter()
 agent = BookingToolAgent()
+admin_agent = AdminAgent()
+
+WEB_ADMIN_USER_ID = "216d5ab6-e8ef-4a5c-8b7c-45be19b28334"
 
 # Admin notification configuration
 ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")  # Configure your admin notification endpoint
@@ -134,13 +138,105 @@ async def notify_admin(payment_details: str, image_url: str, booking_id: str):
     # Or send via email/Slack webhook
     pass
 
+async def handle_admin_message(
+    incoming_text: str,
+    admin_user_id: str,
+    db
+) -> ChatResponse:
+    """
+    Process admin confirmation/rejection commands
+    
+    Args:
+        incoming_text: Admin's message (e.g., "confirm ABC-123")
+        admin_user_id: Admin's user ID
+        db: Database session
+        
+    Returns:
+        ChatResponse with status and admin feedback
+        
+    Note: Customer notifications are handled automatically by booking tools
+    (confirm_booking_payment and reject_booking_payment). These tools check
+    if the booking is from web or WhatsApp and send notifications accordingly.
+    """
+    try:
+        # Get or create admin session
+        session_id = get_or_create_session(admin_user_id, db)
+        print(f"📋 Admin session ID: {session_id}")
+        
+        # Call admin agent to process the command
+        # The admin agent will use booking tools which automatically handle customer notifications
+        agent_response = admin_agent.get_response(incoming_text, session_id)
+        
+        print(f"🤖 Admin agent response: {agent_response}")
+        
+        # Extract admin feedback from agent response
+        if isinstance(agent_response, dict):
+            # Check for error
+            if agent_response.get("error"):
+                return ChatResponse(
+                    status="error",
+                    error=agent_response["error"]
+                )
+            
+            # Check if it's a successful booking operation
+            if agent_response.get("success"):
+                # Booking tools already sent notification to customer
+                # Just provide feedback to admin
+                booking_id = agent_response.get("booking_id", "")
+                booking_status = agent_response.get("booking_status", "")
+                is_web = agent_response.get("is_web", False)
+                customer_phone = agent_response.get("customer_phone", "")
+                
+                if booking_status == "Confirmed":
+                    if is_web:
+                        admin_feedback = f"✅ Booking {booking_id} confirmed! Notification sent to web customer."
+                    else:
+                        admin_feedback = f"✅ Booking {booking_id} confirmed! Notification sent to customer via WhatsApp: {customer_phone}"
+                elif booking_status == "Rejected":
+                    if is_web:
+                        admin_feedback = f"❌ Booking {booking_id} rejected. Notification sent to web customer."
+                    else:
+                        admin_feedback = f"❌ Booking {booking_id} rejected. Notification sent to customer via WhatsApp: {customer_phone}"
+                else:
+                    admin_feedback = agent_response.get("message", "Operation completed successfully")
+                
+                return ChatResponse(
+                    status="success",
+                    bot_response=admin_feedback
+                )
+            
+            # Other dict responses
+            admin_feedback = agent_response.get("message", str(agent_response))
+        else:
+            # String response
+            admin_feedback = str(agent_response)
+        
+        print(f"✅ Admin feedback: {admin_feedback}")
+        
+        return ChatResponse(
+            status="success",
+            bot_response=admin_feedback
+        )
+        
+    except Exception as e:
+        print(f"❌ Error in handle_admin_message: {e}")
+        print(f"   User ID: {admin_user_id}")
+        print(f"   Command: {incoming_text}")
+        import traceback
+        print("❌ Full traceback:", traceback.format_exc())
+        
+        return ChatResponse(
+            status="error",
+            error=f"Failed to process admin command: {str(e)}"
+        )
+
 # ==================== API Routes ====================
 
 @router.post("/web-chat/send-message", response_model=ChatResponse)
 async def send_web_message(message_data: WebChatMessage):
     """
     Handle text messages from web chat
-    Similar to WhatsApp webhook but for web interface
+    Routes to admin agent if sender is admin, otherwise to booking agent
     """
     db = SessionLocal()
     try:
@@ -148,23 +244,17 @@ async def send_web_message(message_data: WebChatMessage):
         user_id = get_or_create_user_web(message_data.user_id, db)
         print(f"User ID: {user_id}")
         
+        incoming_text = message_data.message
+        
+        # Check if this is an admin user
+        if user_id == WEB_ADMIN_USER_ID:
+            print(f"🔑 Admin user detected, routing to admin agent")
+            return await handle_admin_message(incoming_text, user_id, db)
+        
+        # Regular user flow - continue with booking agent
         # Get or create session
         session_id = get_or_create_session(user_id, db)
         print(f"Session ID: {session_id}")
-
-        incoming_text = message_data.message
-        
-        # Save user message (no WhatsApp ID for web)
-        # user_message = Message(
-        #     user_id=user_id,
-        #     sender="user",
-        #     content=incoming_text,
-        #     whatsapp_message_id=None,  # Not applicable for web
-        #     timestamp=datetime.utcnow()
-        # )
-        # db.add(user_message)
-        # db.commit()
-        # db.refresh(user_message)
 
         # Get bot response
         agent_response = agent.get_response(
@@ -200,7 +290,6 @@ async def send_web_message(message_data: WebChatMessage):
             user_id=user_id,
             sender="bot",
             content=final_message_content,
-            
             whatsapp_message_id=None,  # Not applicable for web
             timestamp=datetime.utcnow()
         )
@@ -457,6 +546,49 @@ async def clear_session(user_id: str):
 
     except Exception as e:
         print(f"❌ Error clearing session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@router.get("/web-chat/admin/notifications")
+async def get_admin_notifications():
+    """
+    Get pending payment verification requests for admin
+    Returns messages sent to admin that contain payment verification requests
+    """
+    db = SessionLocal()
+    try:
+        # Get recent messages for admin user that contain verification requests
+        admin_messages = (
+            db.query(Message)
+            .filter(
+                Message.user_id == WEB_ADMIN_USER_ID,
+                Message.sender == "bot",
+                Message.content.like("%PAYMENT VERIFICATION REQUEST%")
+            )
+            .order_by(Message.timestamp.desc())
+            .limit(20)
+            .all()
+        )
+        
+        notifications = []
+        for msg in admin_messages:
+            notifications.append({
+                "message_id": msg.id,
+                "content": msg.content,
+                "timestamp": msg.timestamp,
+                "is_read": False  # You can add a read status field to Message model if needed
+            })
+        
+        return {
+            "status": "success",
+            "notifications": notifications,
+            "count": len(notifications)
+        }
+        
+    except Exception as e:
+        print(f"❌ Error fetching admin notifications: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

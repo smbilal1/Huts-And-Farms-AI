@@ -769,6 +769,7 @@ def confirm_booking_payment(booking_id: str) -> dict:
     """
     Confirm booking after admin verification (internal use).
     Admin Agent can call this tool to confirm a booking after verifying payment.
+    Returns customer_phone and message for webhook to send to customer.
     """
     db = SessionLocal()
     try:
@@ -781,7 +782,9 @@ def confirm_booking_payment(booking_id: str) -> dict:
             return {
                 "success": True,
                 "already_confirmed": True,
-                "message": "✅ Booking already confirmed"
+                "message": "✅ Booking already confirmed",
+                "customer_phone": booking.user.phone_number,
+                "customer_user_id": booking.user.user_id
             }
         
         # Update booking status to confirmed
@@ -805,7 +808,43 @@ def confirm_booking_payment(booking_id: str) -> dict:
         
         confirmation_message = f"""🎉 *BOOKING CONFIRMED!* ✅
 
-Congratulations! Your payment has been verified and booking is confirmed.
+Congratulations! Your payment has been verified and your booking is now confirmed!
+
+📋 *Booking Details:*
+🆔 Booking ID: `{booking_id}`
+🏠 Property: *{property_name}*
+📍 Location: {property_address}
+📅 Date: {formatted_date}
+🕐 Shift: {booking.shift_type}
+💰 Total Amount: Rs. {int(booking.total_cost)}
+
+📞 *Property Contact:*
+{property_contact}
+
+🎊 *What's Next?*
+• Save this confirmation message
+• Arrive on time for your booking
+• Contact property for any special requests
+• Have a wonderful time!
+
+Thank you for choosing us! 😊
+
+_For any queries, feel free to message us._"""
+
+        # Return data for webhook to send to customer
+        return {
+            "success": True,
+            "customer_phone": booking.user.phone_number,
+            "customer_user_id": booking.user.user_id,
+            "message": confirmation_message
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error confirming booking: {e}")
+        return {"error": f"❌ Error confirming booking: {str(e)}"}
+    finally:
+        db.close()nt has been verified and booking is confirmed.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -877,6 +916,7 @@ def reject_booking_payment(booking_id: str, reason: str = None) -> dict:
     Reject booking payment after admin review (internal use).
     This is called automatically when admin rejects payment.
     Make sure the reason is formatted and explained clearly.
+    Returns customer_phone and message for webhook to send to customer.
     """
     db = SessionLocal()
     try:
@@ -923,30 +963,19 @@ Need help? Contact our support team or try the payment again.
 
 _We're here to help you complete your booking!_ 😊"""
         
-        # Determine if this is a web or WhatsApp booking
-        user_phone = booking.user.phone_number
-        is_web_booking = user_phone is None or user_phone == ""
-        
-        if is_web_booking:
-            # For web bookings, save to user's chat
-            save_web_message_to_db(booking.user.user_id, rejection_message, sender="bot")
-        else:
-            # For WhatsApp bookings, send via WhatsApp
-            print(f"🔄 Sending rejection message to {user_phone}")
-            send_whatsapp_message_sync(user_phone, rejection_message, booking.user.user_id, save_to_db=True)
-
+        # Return data for webhook to send to customer
         return {
             "success": True,
-            "message": "Rejection message sent to customer",
+            "customer_phone": booking.user.phone_number,
+            "customer_user_id": booking.user.user_id,
+            "message": rejection_message,
             "booking_status": "Pending",
-            "customer_phone": user_phone or "Web User",
-            "reason": reason,
-            "is_web": is_web_booking
+            "reason": reason
         }
         
     except Exception as e:
         print(f"❌ Error rejecting payment: {e}")
-        return {"error": "❌ Error rejecting payment"}
+        return {"error": f"❌ Error rejecting payment: {str(e)}"}
     finally:
         db.close()
 
