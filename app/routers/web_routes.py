@@ -204,19 +204,29 @@ async def handle_admin_message(
                 customer_user_id = agent_response.get("customer_user_id")
                 
                 # Determine if customer is web or WhatsApp user
-                if customer_phone and customer_phone != "Web User":
-                    # WhatsApp customer - send via WhatsApp
-                    from tools.booking import send_whatsapp_message_sync
-                    send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
-                    admin_feedback = f"✅ Confirmation sent to customer via WhatsApp: {customer_phone}"
-                else:
+                # Web customers have None or empty phone number
+                is_web_customer = not customer_phone or customer_phone == "" or customer_phone == "Web User"
+                
+                if is_web_customer:
                     # Web customer - save to their chat
                     if customer_user_id:
                         from tools.booking import save_web_message_to_db
                         save_web_message_to_db(customer_user_id, customer_message, sender="bot")
-                        admin_feedback = f"✅ Confirmation sent to web customer"
+                        admin_feedback = f"✅ Confirmation sent to web customer (User ID: {customer_user_id})"
+                        print(f"📧 Sent confirmation to web customer: {customer_user_id}")
                     else:
                         admin_feedback = "❌ Could not identify customer to send confirmation"
+                        print(f"❌ No customer_user_id provided")
+                else:
+                    # WhatsApp customer - send via WhatsApp
+                    from tools.booking import send_whatsapp_message_sync
+                    result = send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
+                    if result["success"]:
+                        admin_feedback = f"✅ Confirmation sent to customer via WhatsApp: {customer_phone}"
+                        print(f"📱 Sent confirmation to WhatsApp customer: {customer_phone}")
+                    else:
+                        admin_feedback = f"❌ Failed to send WhatsApp message to: {customer_phone}"
+                        print(f"❌ WhatsApp send failed for: {customer_phone}")
                 
                 # Save admin feedback to admin's chat
                 admin_bot_message = Message(
