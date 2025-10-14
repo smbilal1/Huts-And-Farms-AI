@@ -209,7 +209,16 @@ async def handle_admin_message(
                     print(f"❌ No customer_user_id provided")
                 else:
                     # Get customer's session to check source
+                    # First try to find session by user_id
                     customer_session = db.query(SessionModel).filter_by(user_id=customer_user_id).first()
+                    
+                    print(f"🔍 Looking for customer session:")
+                    print(f"   Customer User ID: {customer_user_id}")
+                    print(f"   Admin User ID: {admin_user_id}")
+                    print(f"   Session found: {customer_session is not None}")
+                    if customer_session:
+                        print(f"   Session source: {customer_session.source}")
+                        print(f"   Session user_id: {customer_session.user_id}")
                     
                     if not customer_session:
                         admin_feedback = "❌ Customer session not found"
