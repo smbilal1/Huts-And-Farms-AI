@@ -346,7 +346,7 @@ def start_cleanup_scheduler():
         
         scheduler.start()
         logger.info("✅ Cleanup scheduler started - runs every 15 minutes")
-        logger.info("   - Deletes inactive sessions (24+ hours)")
+        logger.info("   - Deletes inactive sessions (6+ hours)")
         logger.info("   - Expires pending bookings (15+ minutes) - Status changed to 'Expired'")
         
         # Ensure scheduler shuts down when the application exits

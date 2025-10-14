@@ -126,7 +126,7 @@ def extract_media_urls(text: str) -> Optional[Dict[str, List[str]]]:
 
 async def notify_admin(payment_details: str, image_url: str, booking_id: str):
     """
-    Send admin notification by saving to admin's chat
+    Send admin notification by saving to admin's chat with payment screenshot
     """
     from tools.booking import save_web_message_to_db
     
@@ -135,15 +135,20 @@ async def notify_admin(payment_details: str, image_url: str, booking_id: str):
         print(f"   Booking ID: {booking_id}")
         print(f"   Payment Screenshot: {image_url}")
         
+        # Append image URL to payment details message
+        # This way the admin can see both the details AND the image
+        message_with_image = f"{payment_details}\n\n📸 Payment Screenshot:\n{image_url}"
+        
         # Save message to admin's conversation
         message_id = save_web_message_to_db(
             user_id=WEB_ADMIN_USER_ID,
-            content=payment_details,
+            content=message_with_image,
             sender="bot"
         )
         
         if message_id:
             print(f"✅ Admin notification saved - Message ID: {message_id}")
+            print(f"   Image URL included: {image_url}")
         else:
             print(f"❌ Failed to save admin notification")
             
