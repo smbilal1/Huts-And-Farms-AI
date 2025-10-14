@@ -448,7 +448,7 @@ def create_booking(
             booking_date=datetime.strptime(booking_date, "%Y-%m-%d").date(),
             shift_type=shift_type,
             total_cost=total_cost,
-            booking_source="WhatsApp Bot",
+            booking_source="Bot",
             status="Pending",
             booked_at=datetime.now(),
             created_at=datetime.now(),
@@ -542,7 +542,7 @@ def process_payment_screenshot(booking_id: str = None) -> dict:
     total_cost = booking.total_cost
     user_phone = booking.user.phone_number
     user_cnic = booking.user.cnic    
-    
+    booking.status = "Waiting"
     message = f"""📸 *Payment Screenshot Received!*
 
 Booking ID: `{booking_id}`

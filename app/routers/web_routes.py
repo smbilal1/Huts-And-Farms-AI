@@ -45,8 +45,9 @@ class WebChatMessage(BaseModel):
     user_id: str
 
 class WebImageMessage(BaseModel):
-    image_url: str  # Frontend should upload to Cloudinary and send URL
+    image_data: str  # Base64 encoded image data OR Cloudinary URL
     user_id: str
+    is_base64: bool = True  # True if image_data is base64, False if it's already a URL
 
 class ChatHistoryRequest(BaseModel):
     user_id: str
@@ -374,7 +375,7 @@ async def send_web_message(message_data: WebChatMessage):
 async def send_web_image(image_data: WebImageMessage):
     """
     Handle image messages from web chat
-    Frontend should upload image to Cloudinary first and send the URL
+    Accepts either base64 image data (uploads to Cloudinary) or Cloudinary URL
     """
     db = SessionLocal()
     try:
@@ -404,7 +405,25 @@ async def send_web_image(image_data: WebImageMessage):
                 bot_response=error_message
             )
 
-        image_url = image_data.image_url
+        # Upload to Cloudinary if base64, otherwise use provided URL
+        if image_data.is_base64:
+            try:
+                # Decode base64 and upload to Cloudinary
+                import base64
+                image_bytes = base64.b64decode(image_data.image_data)
+                result = cloudinary_upload(image_bytes)
+                image_url = result["secure_url"]
+                print(f"✅ Image uploaded to Cloudinary: {image_url}")
+            except Exception as e:
+                print(f"❌ Error uploading to Cloudinary: {e}")
+                return ChatResponse(
+                    status="error",
+                    error="Failed to upload image. Please try again."
+                )
+        else:
+            # Use provided Cloudinary URL
+            image_url = image_data.image_data
+            print(f"📎 Using provided Cloudinary URL: {image_url}")
         
         # Process payment screenshot
         result = extract_text_from_payment_image(image_url)

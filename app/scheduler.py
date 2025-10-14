@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 import logging
-from app.chatbot.models import Session, Message, ImageSent, VideoSent
+from app.chatbot.models import Session, Message, ImageSent, VideoSent, Booking
 from app.database import SessionLocal
 # Set up logging for scheduler
 logging.basicConfig(level=logging.INFO)
@@ -184,7 +184,7 @@ def get_inactive_sessions_preview() -> dict:
     db = SessionLocal()
     try:
         # Calculate cutoff time (24 hours ago)
-        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        cutoff_time = datetime.utcnow() - timedelta(hours=6)
         
         # Get all sessions
         all_sessions = db.query(Session).all()
@@ -227,21 +227,103 @@ def get_inactive_sessions_preview() -> dict:
         db.close()
 
 
+def expire_pending_bookings() -> dict:
+    """
+    Change status of bookings from 'Pending' to 'Expired' after 15 minutes.
+    If a booking was created at 11:00, it will be marked as Expired at 11:16 if still pending.
+    
+    Returns:
+        dict: Summary of expiration operation
+    """
+    db = SessionLocal()
+    try:
+        # Calculate cutoff time (15 minutes ago)
+        cutoff_time = datetime.utcnow() - timedelta(minutes=15)
+        
+        # Find all pending bookings older than 15 minutes
+        expired_bookings = db.query(Booking).filter(
+            and_(
+                Booking.status == "Pending",
+                Booking.created_at < cutoff_time
+            )
+        ).all()
+        
+        if not expired_bookings:
+            logger.info("No expired pending bookings found")
+            return {
+                "success": True,
+                "message": "No expired pending bookings found",
+                "expired_bookings": 0,
+                "cutoff_time": cutoff_time.isoformat()
+            }
+        
+        # Collect booking IDs for logging
+        expired_booking_ids = [booking.booking_id for booking in expired_bookings]
+        
+        # Update status to 'Expired' instead of deleting
+        expired_count = db.query(Booking).filter(
+            and_(
+                Booking.status == "Pending",
+                Booking.created_at < cutoff_time
+            )
+        ).update(
+            {
+                "status": "Expired",
+                "updated_at": datetime.utcnow()
+            },
+            synchronize_session=False
+        )
+        
+        # Commit the update
+        db.commit()
+        
+        logger.info(f"✅ Marked {expired_count} bookings as Expired: {expired_booking_ids}")
+        
+        return {
+            "success": True,
+            "message": f"Successfully marked {expired_count} bookings as Expired",
+            "expired_bookings": expired_count,
+            "expired_booking_ids": expired_booking_ids,
+            "cutoff_time": cutoff_time.isoformat()
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error expiring pending bookings: {e}")
+        return {
+            "success": False,
+            "message": f"❌ Error expiring pending bookings: {str(e)}"
+        }
+    finally:
+        db.close()
+
+
 # Scheduler function - you can call this with a cron job or scheduler
 def scheduled_cleanup():
     """
     Function to be called by a scheduler (cron job, celery, etc.)
+    Runs both session cleanup and booking expiration.
     """
     logger.info(f"Starting scheduled cleanup at {datetime.utcnow()}")
-    result = cleanup_inactive_sessions()
-    logger.info(f"Cleanup result: {result}")
-    return result
+    
+    # Clean up inactive sessions
+    session_result = cleanup_inactive_sessions()
+    logger.info(f"Session cleanup result: {session_result}")
+    
+    # Expire pending bookings (change status to Expired)
+    booking_result = expire_pending_bookings()
+    logger.info(f"Booking expiration result: {booking_result}")
+    
+    return {
+        "session_cleanup": session_result,
+        "booking_expiration": booking_result
+    }
 
 
 def start_cleanup_scheduler():
     """
-    Start the background scheduler for session cleanup.
-    Runs cleanup every hour.
+    Start the background scheduler for session and booking cleanup.
+    Runs cleanup every 15 minutes.
     """
     global scheduler
     
@@ -252,18 +334,20 @@ def start_cleanup_scheduler():
     try:
         scheduler = BackgroundScheduler()
         
-        # Add job to run cleanup every hour
+        # Add job to run cleanup every 15 minutes
         scheduler.add_job(
             func=scheduled_cleanup,
             trigger="interval",
-            hours=1,
-            id='session_cleanup_job',
-            name='Session Cleanup Job',
+            minutes=15,
+            id='cleanup_job',
+            name='Session and Booking Cleanup Job',
             replace_existing=True
         )
         
         scheduler.start()
-        logger.info("✅ Session cleanup scheduler started - runs every hour")
+        logger.info("✅ Cleanup scheduler started - runs every 15 minutes")
+        logger.info("   - Deletes inactive sessions (24+ hours)")
+        logger.info("   - Expires pending bookings (15+ minutes) - Status changed to 'Expired'")
         
         # Ensure scheduler shuts down when the application exits
         atexit.register(stop_cleanup_scheduler)
@@ -282,7 +366,7 @@ def stop_cleanup_scheduler():
     if scheduler and scheduler.running:
         try:
             scheduler.shutdown(wait=True)
-            logger.info("🛑 Session cleanup scheduler stopped")
+            logger.info("🛑 Cleanup scheduler stopped")
         except Exception as e:
             logger.error(f"Error stopping scheduler: {e}")
 
@@ -319,6 +403,56 @@ def get_scheduler_status() -> dict:
     }
 
 
+def get_expired_bookings_preview() -> dict:
+    """
+    Get a preview of pending bookings that would be deleted without actually deleting them.
+    
+    Returns:
+        dict: Preview of bookings that would be affected
+    """
+    db = SessionLocal()
+    try:
+        # Calculate cutoff time (15 minutes ago)
+        cutoff_time = datetime.utcnow() - timedelta(minutes=15)
+        
+        # Find all pending bookings older than 15 minutes
+        expired_bookings = db.query(Booking).filter(
+            and_(
+                Booking.status == "Pending",
+                Booking.created_at < cutoff_time
+            )
+        ).all()
+        
+        booking_list = []
+        for booking in expired_bookings:
+            booking_list.append({
+                "booking_id": booking.booking_id,
+                "user_id": str(booking.user_id),
+                "property_id": str(booking.property_id),
+                "booking_date": booking.booking_date.isoformat() if booking.booking_date else None,
+                "created_at": booking.created_at.isoformat() if booking.created_at else None,
+                "minutes_old": int((datetime.utcnow() - booking.created_at).total_seconds() / 60) if booking.created_at else None,
+                "total_cost": float(booking.total_cost) if booking.total_cost else None,
+                "status": booking.status
+            })
+        
+        return {
+            "success": True,
+            "message": f"Found {len(booking_list)} expired pending bookings",
+            "expired_bookings": booking_list,
+            "cutoff_time": cutoff_time.isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting expired bookings preview: {e}")
+        return {
+            "success": False,
+            "message": f"❌ Error getting expired bookings preview: {str(e)}"
+        }
+    finally:
+        db.close()
+
+
 def run_cleanup_now() -> dict:
     """
     Run cleanup immediately (outside of scheduled time).
@@ -328,6 +462,18 @@ def run_cleanup_now() -> dict:
     """
     logger.info("Manual cleanup triggered")
     return scheduled_cleanup()
+
+
+def run_booking_expiration_now() -> dict:
+    """
+    Run booking expiration immediately (outside of scheduled time).
+    Changes status from 'Pending' to 'Expired' for bookings older than 15 minutes.
+    
+    Returns:
+        dict: Booking expiration result
+    """
+    logger.info("Manual booking expiration triggered")
+    return expire_pending_bookings()
 
 
 # Auto-start scheduler when module is imported (optional)
