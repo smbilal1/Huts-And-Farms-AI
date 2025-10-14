@@ -533,17 +533,25 @@ def process_payment_screenshot(booking_id: str = None) -> dict:
         return False
 
     db = SessionLocal()
-    booking = db.query(Booking).filter_by(booking_id=booking_id).first()
+    try:
+        booking = db.query(Booking).filter_by(booking_id=booking_id).first()
+        
+        if not booking:
+            return {"error": "Booking not found"}
 
-    booking_date =  booking.booking_date.strftime("%d-%m-%Y")
-    shift_type = booking.shift_type 
-    property_name = booking.property.name 
-    property_type = booking.property.type
-    total_cost = booking.total_cost
-    user_phone = booking.user.phone_number
-    user_cnic = booking.user.cnic    
-    booking.status = "Waiting"
-    message = f"""📸 *Payment Screenshot Received!*
+        booking_date = booking.booking_date.strftime("%d-%m-%Y")
+        shift_type = booking.shift_type 
+        property_name = booking.property.name 
+        property_type = booking.property.type
+        total_cost = booking.total_cost
+        user_phone = booking.user.phone_number
+        user_cnic = booking.user.cnic
+        
+        # Update booking status to Waiting
+        booking.status = "Waiting"
+        db.commit()
+        
+        message = f"""📸 *Payment Screenshot Received!*
 
 Booking ID: `{booking_id}`
 Property: *{property_name}*
@@ -560,7 +568,7 @@ To confirm : confirm `{booking_id}`
 To reject : reject `{booking_id}` [reason]
     """
 
-    client_message = f"""📸 *Payment Screenshot Received!*
+        client_message = f"""📸 *Payment Screenshot Received!*
 
 ⏱️ *Verification Status:*
 🔍 Under Review (Usually takes 5-10 minutes)
@@ -568,18 +576,46 @@ To reject : reject `{booking_id}` [reason]
 
 Thank you for your patience! 😊
 """
-    
-    # Determine if this is a web or WhatsApp booking
-    is_web_booking = user_phone is None or user_phone == ""
-    
-    if is_web_booking:
-        # For web bookings, save confirmation to user's chat
-        save_web_message_to_db(booking.user_id, client_message, sender="bot")
-    else:
-        # For WhatsApp bookings, send via WhatsApp
-        send_whatsapp_message_sync(user_phone, client_message, booking.user.user_id, save_to_db=True)
-    
-    return message
+        
+        # Get user's session to determine source
+        user_session = db.query(Session).filter_by(user_id=booking.user_id).first()
+        
+        if not user_session:
+            print(f"⚠️ No session found for user {booking.user_id}, using fallback")
+            # Fallback to old logic
+            is_web_booking = user_phone is None or user_phone == ""
+            if is_web_booking:
+                save_web_message_to_db(booking.user_id, client_message, sender="bot")
+            else:
+                send_whatsapp_message_sync(user_phone, client_message, booking.user.user_id, save_to_db=True)
+        elif user_session.source == "Website":
+            # Website booking - save to user's chat
+            save_web_message_to_db(booking.user_id, client_message, sender="bot")
+            print(f"📧 Sent confirmation to website user: {booking.user_id}")
+        elif user_session.source == "Chatbot":
+            # Chatbot (WhatsApp) booking - send via WhatsApp
+            if user_phone:
+                send_whatsapp_message_sync(user_phone, client_message, booking.user.user_id, save_to_db=True)
+                print(f"📱 Sent confirmation to chatbot user: {user_phone}")
+            else:
+                print(f"⚠️ Chatbot user has no phone number: {booking.user_id}")
+                save_web_message_to_db(booking.user_id, client_message, sender="bot")
+        else:
+            # Unknown source - fallback
+            print(f"⚠️ Unknown session source: {user_session.source}, using fallback")
+            is_web_booking = user_phone is None or user_phone == ""
+            if is_web_booking:
+                save_web_message_to_db(booking.user_id, client_message, sender="bot")
+            else:
+                send_whatsapp_message_sync(user_phone, client_message, booking.user.user_id, save_to_db=True)
+        
+        return message
+        
+    except Exception as e:
+        print(f"❌ Error in process_payment_screenshot: {e}")
+        return {"error": str(e)}
+    finally:
+        db.close()
 
 @tool("process_payment_details")
 def process_payment_details(

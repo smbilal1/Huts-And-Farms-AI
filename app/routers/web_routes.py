@@ -91,7 +91,7 @@ def get_or_create_session(user_id: uuid.UUID, db) -> str:
         return session.id
 
     session_id = str(uuid.uuid4())
-    new_session = SessionModel(id=session_id, user_id=user_id)
+    new_session = SessionModel(id=session_id, user_id=user_id, source="Website")  # Set source as Website
     db.add(new_session)
     db.commit()
     return session_id
@@ -203,30 +203,50 @@ async def handle_admin_message(
                 customer_message = agent_response.get("message", "")
                 customer_user_id = agent_response.get("customer_user_id")
                 
-                # Determine if customer is web or WhatsApp user
-                # Web customers have None or empty phone number
-                is_web_customer = not customer_phone or customer_phone == "" or customer_phone == "Web User"
-                
-                if is_web_customer:
-                    # Web customer - save to their chat
-                    if customer_user_id:
+                # Determine customer type by checking their session source
+                if not customer_user_id:
+                    admin_feedback = "❌ Could not identify customer to send confirmation"
+                    print(f"❌ No customer_user_id provided")
+                else:
+                    # Get customer's session to check source
+                    customer_session = db.query(SessionModel).filter_by(user_id=customer_user_id).first()
+                    
+                    if not customer_session:
+                        admin_feedback = "❌ Customer session not found"
+                        print(f"❌ No session found for customer: {customer_user_id}")
+                    elif customer_session.source == "Website":
+                        # Website customer - save to their chat
                         from tools.booking import save_web_message_to_db
                         save_web_message_to_db(customer_user_id, customer_message, sender="bot")
-                        admin_feedback = f"✅ Confirmation sent to web customer (User ID: {customer_user_id})"
-                        print(f"📧 Sent confirmation to web customer: {customer_user_id}")
+                        admin_feedback = f"✅ Confirmation sent to website customer (User ID: {customer_user_id})"
+                        print(f"📧 Sent confirmation to website customer: {customer_user_id}")
+                    elif customer_session.source == "Chatbot":
+                        # Chatbot (WhatsApp) customer - send via WhatsApp
+                        if customer_phone:
+                            from tools.booking import send_whatsapp_message_sync
+                            result = send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
+                            if result["success"]:
+                                admin_feedback = f"✅ Confirmation sent to chatbot customer via WhatsApp: {customer_phone}"
+                                print(f"📱 Sent confirmation to chatbot customer: {customer_phone}")
+                            else:
+                                admin_feedback = f"❌ Failed to send WhatsApp message to: {customer_phone}"
+                                print(f"❌ WhatsApp send failed for: {customer_phone}")
+                        else:
+                            admin_feedback = "❌ Chatbot customer has no phone number"
+                            print(f"❌ No phone number for chatbot customer: {customer_user_id}")
                     else:
-                        admin_feedback = "❌ Could not identify customer to send confirmation"
-                        print(f"❌ No customer_user_id provided")
-                else:
-                    # WhatsApp customer - send via WhatsApp
-                    from tools.booking import send_whatsapp_message_sync
-                    result = send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
-                    if result["success"]:
-                        admin_feedback = f"✅ Confirmation sent to customer via WhatsApp: {customer_phone}"
-                        print(f"📱 Sent confirmation to WhatsApp customer: {customer_phone}")
-                    else:
-                        admin_feedback = f"❌ Failed to send WhatsApp message to: {customer_phone}"
-                        print(f"❌ WhatsApp send failed for: {customer_phone}")
+                        # Unknown source or None - fallback to old logic
+                        is_web_customer = not customer_phone or customer_phone == ""
+                        if is_web_customer:
+                            from tools.booking import save_web_message_to_db
+                            save_web_message_to_db(customer_user_id, customer_message, sender="bot")
+                            admin_feedback = f"✅ Confirmation sent to customer (fallback to web)"
+                            print(f"📧 Sent confirmation (fallback): {customer_user_id}")
+                        else:
+                            from tools.booking import send_whatsapp_message_sync
+                            result = send_whatsapp_message_sync(customer_phone, customer_message, customer_user_id, save_to_db=True)
+                            admin_feedback = f"✅ Confirmation sent (fallback to WhatsApp): {customer_phone}"
+                            print(f"📱 Sent confirmation (fallback): {customer_phone}")
                 
                 # Save admin feedback to admin's chat
                 admin_bot_message = Message(

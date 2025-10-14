@@ -23,6 +23,8 @@ class Session(Base):
     min_price = Column(Numeric(10, 2), nullable=True)  # Minimum price for the booking
     max_price = Column(Numeric(10, 2), nullable=True)  # Maximum
     max_occupancy = Column(Integer, nullable=True)  # Maximum occupancy for the booking
+    source = Column(Enum("Website", "Chatbot", name="session_source_enum"), nullable=True)  # Session source: Website or Chatbot
+    
     user = relationship("User", backref="sessions")  # Relationship to User model
     property = relationship("Property", backref = "sessions")
 

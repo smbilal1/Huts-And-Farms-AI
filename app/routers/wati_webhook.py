@@ -45,7 +45,7 @@ def get_or_create_session(user_id: str, db) -> str:
         return session.id
 
     session_id = str(uuid.uuid4())
-    new_session = SessionModel(id=session_id, user_id=user_id)
+    new_session = SessionModel(id=session_id, user_id=user_id, source="Chatbot")  # Set source as Chatbot
     db.add(new_session)
     db.commit()
     return session_id
