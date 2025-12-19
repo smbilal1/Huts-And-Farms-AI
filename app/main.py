@@ -1,19 +1,18 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from app.routers import wati_webhook, web_routes
-from app.routers import agent 
+# from app.routers import agent  # REMOVED: Old router causing startup issues
+from app.api.v1 import web_chat, webhooks, admin, demo
 from app.database import engine
-from app.chatbot import models
+from app import models
 import httpx
 import json
 import base64
 import logging
-import os
-from dotenv import load_dotenv
 from typing import Optional
 from datetime import datetime, timedelta
-from app.scheduler import start_cleanup_scheduler
+from app.tasks import start_cleanup_scheduler
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
 
 
 models.Base.metadata.create_all(bind=engine)
@@ -22,11 +21,14 @@ start_cleanup_scheduler()
 
 app = FastAPI()
 
+# Old agent router removed - functionality moved to app/api/v1/
+# app.include_router(agent.router)
 
-
-app.include_router(agent.router)  
-app.include_router(wati_webhook.router)
-app.include_router(web_routes.router, prefix="/api", tags=["Web Chat"])
+# API v1 endpoints
+app.include_router(webhooks.router, tags=["Webhooks"])
+app.include_router(web_chat.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
+app.include_router(demo.router, prefix="/api", tags=["Demo/Test"])
 
 # Allow all origins (for development)
 app.add_middleware(
@@ -42,8 +44,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 registration_store={}
 
-load_dotenv()
-
 VERIFY_TOKEN = "my_custom_secret_token"
-WHATSAPP_TOKEN = os.getenv("META_ACCESS_TOKEN")
-PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID")
+WHATSAPP_TOKEN = settings.META_ACCESS_TOKEN
+PHONE_NUMBER_ID = settings.META_PHONE_NUMBER_ID

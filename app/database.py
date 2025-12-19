@@ -1,13 +1,11 @@
-import os
 import requests
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
 from fastapi import Depends
+from app.core.config import settings
 
-load_dotenv()
-SQLALCHEMY_DATABASE_URL = os.getenv("SQLALCHEMY_DATABASE_URL")
+SQLALCHEMY_DATABASE_URL = settings.SQLALCHEMY_DATABASE_URL
 # Enhanced engine configuration with connection pooling and SSL handling
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
