@@ -65,22 +65,6 @@ def send_booking_intro() -> str:
     Returns:
         Formatted WhatsApp message with booking instructions
     """
-    # message = (
-    #     "🏡 *Welcome to Huts & Farms Booking!*\n\n"
-    #     "I'm your AI booking assistant. I'll help you book the perfect getaway! 🌟\n\n"
-    #     "📋 *To book, I need:*\n\n"
-    #     "📅 *Date:* When do you want to visit?\n"
-    #     "⏰ *Shift:* Choose one:\n"
-    #     "   • Day (8 AM - 8 PM)\n"
-    #     "   • Night (8 PM - 8 AM)\n"
-    #     "   • Full Day (24 hours)\n"
-    #     "   • Full Night (24 hours)\n\n"
-    #     "👥 *Persons:* How many people?\n"
-    #     "🏠 *Property Type:* Hut or Farmhouse?\n\n"
-    
-    # )
-    
-    # return message
 
     message = """
     Hello! I’m HutBuddy AI, your booking assistant.
