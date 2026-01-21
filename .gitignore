@@ -5,6 +5,7 @@ venv/
 # Ignore environment variable files
 .env
 .env.*
-
+.kiro
+.pytest_cache
 # Ignore cache files
 __pycache__/
