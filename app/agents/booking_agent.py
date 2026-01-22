@@ -1,20 +1,21 @@
 from datetime import date
 from xml.parsers.expat import model
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langgraph.prebuilt import create_react_agent
+from datetime import date
 from app.database import SessionLocal
 from app.models import Session, Message
 from langchain_google_genai import ChatGoogleGenerativeAI
-import google.generativeai as genai
+import google.genai as genai
 from sqlalchemy import text
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime
-from langchain.schema import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from app.core.config import settings
 
 
 
-genai.configure(api_key=settings.GOOGLE_API_KEY)
+client = genai.Client(api_key=settings.GOOGLE_API_KEY)
 
 # Import refactored agent tools from new structure
 from app.agents.tools.booking_tools import (
@@ -156,22 +157,14 @@ class BookingToolAgent:
         self.prompt = ChatPromptTemplate(
             [
                 ("system", system_prompt),
-                MessagesPlaceholder(variable_name='chat_history'),
-                ("human", "{input}"),
-                ("placeholder", "{agent_scratchpad}"),
+                MessagesPlaceholder(variable_name='messages'),
             ]
-        ).partial()
-
-        self.agent = create_tool_calling_agent(
-            llm=self.llm,
-            tools=self.tools,
-            prompt=self.prompt
         )
 
-        self.executor = AgentExecutor(
-            agent=self.agent,
+        self.agent = create_react_agent(
+            model=self.llm,
             tools=self.tools,
-            verbose=True
+            prompt=self.prompt
         )
 
   
@@ -187,12 +180,12 @@ class BookingToolAgent:
             List[float]: A list of embedding floats (3072 dimensions).
         """
         try:
-            response = genai.embed_content(
+            response = client.models.embed_content(
                 model="models/gemini-embedding-001",
                 content=text,
                 task_type=task_type,
             )
-            return response["embedding"]
+            return response.embedding
         except Exception as e:
             print(f"[❌] Embedding generation failed: {e}")
             return []
@@ -231,19 +224,46 @@ class BookingToolAgent:
         db.close()
         print(incoming_text)
         # Run agent with context
-        response = self.executor.invoke({
-            "input": incoming_text,
-            "date": date.today().isoformat(),
-            "session_id": session_id,
-            "chat_history": chat_history,
-
-            "name" : name,
-            "property_type": property_type,
-            "booking_date": booking_date,
-            "shift_type": shift_type,
-            "min_price": min_price,
-            "max_price": max_price,
-            "max_occupancy": max_occupancy,
+        messages = []
+        for msg in chat_history:
+            if msg.startswith("User:"):
+                messages.append(("human", msg[5:]))
+            elif msg.startswith("Assistant:"):
+                messages.append(("assistant", msg[10:]))
+        
+        # Add current message
+        messages.append(("human", incoming_text))
+        
+        # Format the system prompt with session context
+        formatted_system_prompt = system_prompt.format(
+            session_id=session_id,
+            name=name,
+            date=date.today().isoformat(),
+            property_type=property_type,
+            booking_date=booking_date,
+            shift_type=shift_type,
+            min_price=min_price,
+            max_price=max_price,
+            max_occupancy=max_occupancy
+        )
+        
+        # Create a temporary prompt with the formatted system message
+        temp_prompt = ChatPromptTemplate(
+            [
+                ("system", formatted_system_prompt),
+                MessagesPlaceholder(variable_name='messages'),
+            ]
+        )
+        
+        # Create a temporary agent with the formatted prompt
+        temp_agent = create_react_agent(
+            model=self.llm,
+            tools=self.tools,
+            prompt=temp_prompt
+        )
+        
+        response = temp_agent.invoke({
+            "messages": messages,
         })
         print("Agent response:", response)
-        return response["output"]
+        return response["messages"][-1].content

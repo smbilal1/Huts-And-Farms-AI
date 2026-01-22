@@ -7,7 +7,7 @@ This module provides integration with Google's Gemini AI for:
 - Image content analysis
 """
 
-import google.generativeai as genai
+import google.genai as genai
 import requests
 from PIL import Image
 import io
@@ -30,8 +30,7 @@ class GeminiClient:
     def __init__(self):
         """Initialize Gemini client with API key from settings."""
         try:
-            genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            self.client = genai.Client(api_key=settings.GOOGLE_API_KEY)
             logger.info("GeminiClient initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize GeminiClient: {e}")
@@ -84,7 +83,10 @@ class GeminiClient:
             prompt = self._get_payment_extraction_prompt()
             logger.info("Sending image to Gemini for analysis")
             
-            response = self.model.generate_content([prompt, image])
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[prompt, image]
+            )
             response_text = response.text.strip()
             
             logger.debug(f"Gemini response: {response_text[:200]}...")
