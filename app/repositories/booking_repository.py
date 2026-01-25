@@ -184,3 +184,48 @@ class BookingRepository(BaseRepository[Booking]):
         ).all()
         
         return expired_bookings
+    
+    def get_payment_screenshot_url(
+        self,
+        db: Session,
+        booking_id: str
+    ) -> Optional[str]:
+        """
+        Get the payment screenshot URL for a booking.
+        
+        Args:
+            db: Database session
+            booking_id: Unique booking identifier
+            
+        Returns:
+            Payment screenshot URL if exists, None otherwise
+        """
+        booking = self.get_by_booking_id(db, booking_id)
+        return booking.payment_screenshot_url if booking else None
+    
+    def update_payment_screenshot_url(
+        self,
+        db: Session,
+        booking_id: str,
+        screenshot_url: str
+    ) -> Optional[Booking]:
+        """
+        Update the payment screenshot URL for a booking.
+        
+        Args:
+            db: Database session
+            booking_id: Unique booking identifier
+            screenshot_url: Cloudinary URL of the payment screenshot
+            
+        Returns:
+            Updated booking instance if found, None otherwise
+        """
+        booking = self.get_by_booking_id(db, booking_id)
+        
+        if booking:
+            booking.payment_screenshot_url = screenshot_url
+            booking.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(booking)
+        
+        return booking
