@@ -29,16 +29,31 @@ def extract_media_urls(text: str) -> Dict[str, List[str]]:
     if not text:
         return {"images": [], "videos": []}
     
+    def clean_url(url: str) -> str:
+        """Clean URL by removing trailing non-URL characters"""
+        # Remove everything after newline
+        url = url.split('\n')[0]
+        # Remove trailing punctuation and quotes
+        url = url.rstrip('.,;:!?\'"')
+        return url.strip()
+    
     images = []
     videos = []
     
-    # Pattern for Cloudinary URLs
-    cloudinary_pattern = r'https://res\.cloudinary\.com/[^\s]+'
+    # Pattern for Cloudinary URLs - stops at whitespace or newline
+    cloudinary_pattern = r'https://res\.cloudinary\.com/[^\s\n]+'
     
     # Find all Cloudinary URLs
     cloudinary_urls = re.findall(cloudinary_pattern, text)
     
     for url in cloudinary_urls:
+        # Clean the URL first
+        url = clean_url(url)
+        
+        # Skip if empty after cleaning
+        if not url:
+            continue
+        
         # Determine if it's an image or video based on URL path
         if '/image/' in url or url.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
             if url not in images:
@@ -51,20 +66,23 @@ def extract_media_urls(text: str) -> Dict[str, List[str]]:
             if url not in images:
                 images.append(url)
     
-    # Also look for other common image/video URLs
-    general_image_pattern = r'https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp)'
-    general_video_pattern = r'https?://[^\s]+\.(?:mp4|mov|avi|webm)'
+    # Also look for other common image/video URLs (non-Cloudinary)
+    # Use negative lookahead to exclude Cloudinary URLs already captured
+    general_image_pattern = r'https?://(?!res\.cloudinary\.com)[^\s\n]+\.(?:jpg|jpeg|png|gif|webp)'
+    general_video_pattern = r'https?://(?!res\.cloudinary\.com)[^\s\n]+\.(?:mp4|mov|avi|webm)'
     
     general_images = re.findall(general_image_pattern, text, re.IGNORECASE)
     general_videos = re.findall(general_video_pattern, text, re.IGNORECASE)
     
-    # Add non-duplicate URLs
+    # Clean and add non-duplicate URLs
     for img in general_images:
-        if img not in images:
+        img = clean_url(img)
+        if img and img not in images:
             images.append(img)
     
     for vid in general_videos:
-        if vid not in videos:
+        vid = clean_url(vid)
+        if vid and vid not in videos:
             videos.append(vid)
     
     return {"images": images, "videos": videos}
