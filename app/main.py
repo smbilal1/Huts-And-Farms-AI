@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 # from app.routers import agent  # REMOVED: Old router causing startup issues
-from app.api.v1 import web_chat, webhooks, admin, demo
+from app.api.v1 import web_chat, webhooks, admin, demo, admin_booking
 from app.database import engine
 from app import models
 import httpx
@@ -28,6 +28,7 @@ app = FastAPI()
 app.include_router(webhooks.router, tags=["Webhooks"])
 app.include_router(web_chat.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(admin_booking.router, prefix="/api")
 app.include_router(demo.router, prefix="/api", tags=["Demo/Test"])
 
 # Allow all origins (for development)

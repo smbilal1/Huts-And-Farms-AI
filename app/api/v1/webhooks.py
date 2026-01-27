@@ -335,6 +335,11 @@ async def _handle_image_message(
             whatsapp_message_id=user_whatsapp_msg_id
         )
         
+        # Store the payment screenshot URL in the booking
+        from app.repositories.booking_repository import BookingRepository
+        booking_repo = BookingRepository()
+        booking_repo.update_payment_screenshot_url(db, booking_id, image_url)
+        
         # Process payment screenshot using agent (will be refactored in Phase 8)
         agent = get_agent()
         payment_details = agent.get_response(

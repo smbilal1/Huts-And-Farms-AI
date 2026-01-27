@@ -16,6 +16,7 @@ class Booking(Base):
     total_cost = Column(Numeric(10, 2), nullable=False)
     booking_source = Column(Enum("Website", "Bot", "Third-Party", name="booking_source_enum"), nullable=False)
     status = Column(Enum("Pending", "Waiting", "Confirmed", "Cancelled", "Completed", "Expired", name="booking_status_enum"), default="Pending")
+    payment_screenshot_url = Column(Text, nullable=True)  # New field for storing Cloudinary URL of payment screenshot
     booked_at = Column(DateTime)
     created_at = Column(DateTime)
     updated_at = Column(DateTime)

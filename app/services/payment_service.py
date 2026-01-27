@@ -161,9 +161,14 @@ class PaymentService:
                     "payment_info": payment_info
                 }
             
-            # Update booking status to Waiting
-            self.booking_repo.update_status(db, booking_id, "Waiting")
-            logger.info(f"Booking status updated to Waiting: {booking_id}")
+            # Update booking status to Waiting and store screenshot URL
+            booking = self.booking_repo.update_status(db, booking_id, "Waiting")
+            
+            # Store the payment screenshot URL in the booking
+            booking.payment_screenshot_url = image_url
+            db.commit()
+            
+            logger.info(f"Booking status updated to Waiting and screenshot URL stored: {booking_id}")
             
             # Format success message
             message = self._format_screenshot_received_message(booking, payment_info)
