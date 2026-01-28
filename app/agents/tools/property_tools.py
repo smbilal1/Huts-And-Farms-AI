@@ -314,13 +314,102 @@ def get_property_details(session_id: str) -> str:
         db.close()
 
 
+@tool("get_property_media")
+def get_property_media(session_id: str) -> str:
+    """
+    Get all media (images and videos) for a specific property.
+    
+    Use this tool when the user asks for:
+    - "Show me images and videos"
+    - "Show me all media"
+    - "Show me pictures and videos"
+    - Both images and videos together
+    
+    Returns a combined message with both images and videos.
+    
+    Args:
+        session_id: Session ID containing the property_id
+        
+    Returns:
+        Message with both image and video URLs or error message
+    """
+    db = SessionLocal()
+    try:
+        # Get session to find property_id
+        session_repo = SessionRepository()
+        session = session_repo.get_by_id(db, session_id)
+        
+        if not session:
+            return "Session not found. Please restart the conversation."
+        
+        if not session.property_id:
+            return "Please provide property name first."
+        
+        # Get property details for name
+        property_service = PropertyService(
+            PropertyRepository(),
+            BookingRepository()
+        )
+        
+        result = property_service.get_property_details(
+            db=db,
+            property_id=str(session.property_id),
+            include_media=False
+        )
+        
+        if "error" in result:
+            return result["error"]
+        
+        property_name = result["name"]
+        
+        # Get both images and videos
+        images = property_service.get_property_images(
+            db=db,
+            property_id=str(session.property_id)
+        )
+        
+        videos = property_service.get_property_videos(
+            db=db,
+            property_id=str(session.property_id)
+        )
+        
+        if not images and not videos:
+            return f"No media available for {property_name}."
+        
+        # Format combined response
+        response = f"Here are the images and videos of {property_name}:\n\n"
+        
+        if images:
+            response += "Images:\n"
+            for i, img_url in enumerate(images, 1):
+                response += f"{i}. {img_url}\n"
+            response += "\n"
+        
+        if videos:
+            response += "Videos:\n"
+            for i, video_url in enumerate(videos, 1):
+                response += f"{i}. {video_url}\n"
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in get_property_media tool: {e}", exc_info=True)
+        return "Error retrieving property media. Please try again."
+    finally:
+        db.close()
+
+
 @tool("get_property_images")
 def get_property_images(session_id: str) -> str:
     """
-    Get all image URLs for a specific property.
+    Get ONLY image URLs for a specific property.
     
-    Use this tool when the user asks to see images or pictures of a property.
-    Returns a list of image URLs that can be displayed to the user.
+    Use this tool when the user asks SPECIFICALLY for images only:
+    - "Show me images" (without mentioning videos)
+    - "Show me pictures" (without mentioning videos)
+    - "Show me photos" (without mentioning videos)
+    
+    If user asks for both images AND videos, use get_property_media instead.
     
     Args:
         session_id: Session ID containing the property_id
@@ -354,8 +443,22 @@ def get_property_images(session_id: str) -> str:
         if not images:
             return "No images available for this property."
         
-        # Format response with image URLs
-        response = f"Here are the images for this property:\n\n"
+        # Get property name for better response
+        property_service = PropertyService(
+            PropertyRepository(),
+            BookingRepository()
+        )
+        
+        result = property_service.get_property_details(
+            db=db,
+            property_id=str(session.property_id),
+            include_media=False
+        )
+        
+        property_name = result.get("name", "this property") if "error" not in result else "this property"
+        
+        # Format response with descriptive text and URLs
+        response = f"Here are the images for {property_name}:\n\n"
         for i, img_url in enumerate(images, 1):
             response += f"{i}. {img_url}\n"
         
@@ -371,10 +474,13 @@ def get_property_images(session_id: str) -> str:
 @tool("get_property_videos")
 def get_property_videos(session_id: str) -> str:
     """
-    Get all video URLs for a specific property.
+    Get ONLY video URLs for a specific property.
     
-    Use this tool when the user asks to see videos of a property.
-    Returns a list of video URLs that can be displayed to the user.
+    Use this tool when the user asks SPECIFICALLY for videos only:
+    - "Show me videos" (without mentioning images)
+    - "Show me video tour" (without mentioning images)
+    
+    If user asks for both images AND videos, use get_property_media instead.
     
     Args:
         session_id: Session ID containing the property_id
@@ -408,8 +514,22 @@ def get_property_videos(session_id: str) -> str:
         if not videos:
             return "No videos available for this property."
         
-        # Format response with video URLs
-        response = f"Here are the videos for this property:\n\n"
+        # Get property name for better response
+        property_service = PropertyService(
+            PropertyRepository(),
+            BookingRepository()
+        )
+        
+        result = property_service.get_property_details(
+            db=db,
+            property_id=str(session.property_id),
+            include_media=False
+        )
+        
+        property_name = result.get("name", "this property") if "error" not in result else "this property"
+        
+        # Format response with descriptive text and URLs
+        response = f"Here are the videos for {property_name}:\n\n"
         for i, video_url in enumerate(videos, 1):
             response += f"{i}. {video_url}\n"
         
@@ -564,6 +684,7 @@ property_tools = [
     list_properties,
     get_property_pricing,
     get_property_details,
+    get_property_media,
     get_property_images,
     get_property_videos,
     get_property_id_from_name,
@@ -573,6 +694,7 @@ __all__ = [
     "list_properties",
     "get_property_pricing",
     "get_property_details",
+    "get_property_media",
     "get_property_images",
     "get_property_videos",
     "get_property_id_from_name",

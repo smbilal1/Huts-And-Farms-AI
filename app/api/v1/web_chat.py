@@ -418,16 +418,25 @@ async def send_web_message(
             whatsapp_message_id=None  # Not applicable for web
         )
         
-        # Extract response content
-        if isinstance(agent_response, dict):
-            if 'output' in agent_response and isinstance(agent_response['output'], dict):
-                message_content = agent_response['output'].get('message', '')
-                error_content = agent_response['output'].get('error', '')
-                response_text = message_content or error_content or str(agent_response)
+        # Extract response content - agent should return clean text
+        # Handle different response types
+        if isinstance(agent_response, str):
+            response_text = agent_response.strip()
+        elif isinstance(agent_response, list) and len(agent_response) > 0:
+            # If it's a list, try to extract text from the first item
+            first_item = agent_response[0]
+            if isinstance(first_item, dict) and 'text' in first_item:
+                response_text = first_item['text'].strip()
+            elif isinstance(first_item, dict) and 'content' in first_item:
+                response_text = first_item['content'].strip()
             else:
-                response_text = agent_response.get('message', '') or agent_response.get('error', '') or str(agent_response)
+                response_text = str(first_item).strip()
+        elif hasattr(agent_response, 'content'):
+            # If it has a content attribute
+            response_text = agent_response.content.strip()
         else:
-            response_text = str(agent_response)
+            # Fallback to string conversion
+            response_text = str(agent_response).strip()
         
         # Format response
         formatted_response = formatting(response_text)
@@ -436,7 +445,34 @@ async def send_web_message(
         # Prepare final message content
         if urls:
             cleaned_response = remove_cloudinary_links(formatted_response)
-            final_message_content = cleaned_response
+            final_message_content = cleaned_response.strip()
+            
+            # If the cleaned response is empty or just whitespace, provide a default message
+            if not final_message_content or final_message_content.isspace():
+                # Check if we have both images and videos
+                has_images = urls.get("images") and len(urls.get("images", [])) > 0
+                has_videos = urls.get("videos") and len(urls.get("videos", [])) > 0
+                
+                if has_images and has_videos:
+                    final_message_content = "Here are the images and videos for this property:"
+                elif has_images:
+                    final_message_content = "Here are the images for this property:"
+                elif has_videos:
+                    final_message_content = "Here are the videos for this property:"
+                else:
+                    final_message_content = "Here is the media for this property:"
+            else:
+                # Check if the response mentions both images and videos separately
+                # and replace with combined message if property name is available
+                if "Here are the images for" in final_message_content and "And here are the videos:" in final_message_content:
+                    # Extract property name from the response
+                    import re
+                    match = re.search(r"Here are the images for ([^:]+):", final_message_content)
+                    if match:
+                        property_name = match.group(1).strip()
+                        final_message_content = f"Here are the images and videos of {property_name}:"
+                    else:
+                        final_message_content = "Here are the images and videos for this property:"
         else:
             final_message_content = formatted_response
         

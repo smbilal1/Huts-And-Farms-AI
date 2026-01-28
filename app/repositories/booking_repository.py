@@ -29,16 +29,22 @@ class BookingRepository(BaseRepository[Booking]):
     
     def get_by_booking_id(self, db: Session, booking_id: str) -> Optional[Booking]:
         """
-        Retrieve a booking by its booking ID.
+        Retrieve a booking by its booking ID with user and property relationships loaded.
         
         Args:
             db: Database session
             booking_id: Unique booking identifier
             
         Returns:
-            Booking instance if found, None otherwise
+            Booking instance with user and property loaded if found, None otherwise
         """
-        return db.query(Booking).filter(Booking.booking_id == booking_id).first()
+        from sqlalchemy.orm import joinedload
+        return (
+            db.query(Booking)
+            .options(joinedload(Booking.user), joinedload(Booking.property))
+            .filter(Booking.booking_id == booking_id)
+            .first()
+        )
     
     def get_user_bookings(
         self, 

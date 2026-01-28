@@ -13,18 +13,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.api.dependencies import (
     get_payment_service,
-    get_notification_service,
     get_user_repository,
-    get_session_repository,
     get_message_repository
 )
 from app.services.payment_service import PaymentService
-from app.services.notification_service import NotificationService
 from app.repositories.user_repository import UserRepository
-from app.repositories.session_repository import SessionRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.booking_repository import BookingRepository
-from app.integrations.whatsapp import WhatsAppClient
 from app.core.exceptions import (
     AppException,
     BookingException,
@@ -40,6 +35,14 @@ class ConfirmBookingRequest(BaseModel):
     """Request model for confirming a booking."""
     booking_id: str
     admin_notes: Optional[str] = None
+
+
+class UpdateBookingStatusRequest(BaseModel):
+    """Request model for updating booking status."""
+    booking_id: str
+    status: str  # "Pending", "Waiting", "Confirmed", "Cancelled", "Completed", "Expired"
+    admin_notes: Optional[str] = None
+    rejection_reason: Optional[str] = None  # Required only for "Cancelled" status
 
 
 class RejectBookingRequest(BaseModel):
@@ -70,7 +73,6 @@ async def confirm_booking(
     db: Session = Depends(get_db),
     payment_service: PaymentService = Depends(get_payment_service),
     user_repo: UserRepository = Depends(get_user_repository),
-    session_repo: SessionRepository = Depends(get_session_repository),
     message_repo: MessageRepository = Depends(get_message_repository)
 ):
     """
@@ -113,84 +115,37 @@ async def confirm_booking(
             )
         
         booking = result["booking"]
-        customer_user_id = result["customer_user_id"]
-        customer_phone = result.get("customer_phone")
+        
+        # Get customer info from the booking - with fallback to result data
+        customer_user_id = booking.user_id
+        customer_phone = None
+        
+        # Try to get phone from user relationship first
+        if hasattr(booking, 'user') and booking.user:
+            customer_phone = booking.user.phone_number
+        
+        # Fallback to result data if available
+        if not customer_phone and "customer_phone" in result:
+            customer_phone = result["customer_phone"]
+            
         confirmation_message = result["message"]
         
-        # Determine how to notify the user (WhatsApp or Web)
-        user_session = session_repo.get_by_user_id(db, customer_user_id)
-        notification_method = None
-        user_notified = False
-        
-        if user_session and user_session.source == "Website":
-            # Web user - save message to their chat
-            message_repo.save_message(
-                db=db,
-                user_id=customer_user_id,
-                sender="bot",
-                content=confirmation_message,
-                whatsapp_message_id=None
-            )
-            notification_method = "web_chat"
-            user_notified = True
-            
-        elif user_session and user_session.source == "Chatbot" and customer_phone:
-            # WhatsApp user - send via WhatsApp
-            try:
-                whatsapp_client = WhatsAppClient()
-                whatsapp_result = await whatsapp_client.send_message(
-                    customer_phone,
-                    confirmation_message,
-                    customer_user_id,
-                    save_to_db=True
-                )
-                
-                if whatsapp_result.get("success"):
-                    notification_method = "whatsapp"
-                    user_notified = True
-                else:
-                    # Fallback to web chat if WhatsApp fails
-                    message_repo.save_message(
-                        db=db,
-                        user_id=customer_user_id,
-                        sender="bot",
-                        content=confirmation_message,
-                        whatsapp_message_id=None
-                    )
-                    notification_method = "web_chat_fallback"
-                    user_notified = True
-                    
-            except Exception as e:
-                print(f"❌ WhatsApp notification failed: {e}")
-                # Fallback to web chat
-                message_repo.save_message(
-                    db=db,
-                    user_id=customer_user_id,
-                    sender="bot",
-                    content=confirmation_message,
-                    whatsapp_message_id=None
-                )
-                notification_method = "web_chat_fallback"
-                user_notified = True
-        else:
-            # Unknown source or no phone - fallback to web chat
-            message_repo.save_message(
-                db=db,
-                user_id=customer_user_id,
-                sender="bot",
-                content=confirmation_message,
-                whatsapp_message_id=None
-            )
-            notification_method = "web_chat_fallback"
-            user_notified = True
+        # Send confirmation message via web chat only
+        message_repo.save_message(
+            db=db,
+            user_id=customer_user_id,
+            sender="bot",
+            content=confirmation_message,
+            whatsapp_message_id=None
+        )
         
         return BookingActionResponse(
             success=True,
             message=f"Booking {request.booking_id} confirmed successfully",
             booking_id=request.booking_id,
             booking_status="Confirmed",
-            user_notified=user_notified,
-            notification_method=notification_method
+            user_notified=True,
+            notification_method="web_chat"
         )
         
     except HTTPException:
@@ -217,7 +172,6 @@ async def reject_booking(
     db: Session = Depends(get_db),
     payment_service: PaymentService = Depends(get_payment_service),
     user_repo: UserRepository = Depends(get_user_repository),
-    session_repo: SessionRepository = Depends(get_session_repository),
     message_repo: MessageRepository = Depends(get_message_repository)
 ):
     """
@@ -260,84 +214,37 @@ async def reject_booking(
             )
         
         booking = result["booking"]
-        customer_user_id = result["customer_user_id"]
-        customer_phone = result.get("customer_phone")
+        
+        # Get customer info from the booking - with fallback to result data
+        customer_user_id = booking.user_id
+        customer_phone = None
+        
+        # Try to get phone from user relationship first
+        if hasattr(booking, 'user') and booking.user:
+            customer_phone = booking.user.phone_number
+        
+        # Fallback to result data if available
+        if not customer_phone and "customer_phone" in result:
+            customer_phone = result["customer_phone"]
+            
         rejection_message = result["message"]
         
-        # Determine how to notify the user (WhatsApp or Web)
-        user_session = session_repo.get_by_user_id(db, customer_user_id)
-        notification_method = None
-        user_notified = False
-        
-        if user_session and user_session.source == "Website":
-            # Web user - save message to their chat
-            message_repo.save_message(
-                db=db,
-                user_id=customer_user_id,
-                sender="bot",
-                content=rejection_message,
-                whatsapp_message_id=None
-            )
-            notification_method = "web_chat"
-            user_notified = True
-            
-        elif user_session and user_session.source == "Chatbot" and customer_phone:
-            # WhatsApp user - send via WhatsApp
-            try:
-                whatsapp_client = WhatsAppClient()
-                whatsapp_result = await whatsapp_client.send_message(
-                    customer_phone,
-                    rejection_message,
-                    customer_user_id,
-                    save_to_db=True
-                )
-                
-                if whatsapp_result.get("success"):
-                    notification_method = "whatsapp"
-                    user_notified = True
-                else:
-                    # Fallback to web chat if WhatsApp fails
-                    message_repo.save_message(
-                        db=db,
-                        user_id=customer_user_id,
-                        sender="bot",
-                        content=rejection_message,
-                        whatsapp_message_id=None
-                    )
-                    notification_method = "web_chat_fallback"
-                    user_notified = True
-                    
-            except Exception as e:
-                print(f"❌ WhatsApp notification failed: {e}")
-                # Fallback to web chat
-                message_repo.save_message(
-                    db=db,
-                    user_id=customer_user_id,
-                    sender="bot",
-                    content=rejection_message,
-                    whatsapp_message_id=None
-                )
-                notification_method = "web_chat_fallback"
-                user_notified = True
-        else:
-            # Unknown source or no phone - fallback to web chat
-            message_repo.save_message(
-                db=db,
-                user_id=customer_user_id,
-                sender="bot",
-                content=rejection_message,
-                whatsapp_message_id=None
-            )
-            notification_method = "web_chat_fallback"
-            user_notified = True
+        # Send rejection message via web chat only
+        message_repo.save_message(
+            db=db,
+            user_id=customer_user_id,
+            sender="bot",
+            content=rejection_message,
+            whatsapp_message_id=None
+        )
         
         return BookingActionResponse(
             success=True,
             message=f"Booking {request.booking_id} rejected successfully",
             booking_id=request.booking_id,
             booking_status="Pending",
-            user_notified=user_notified,
-            notification_method=notification_method
+            user_notified=True,
+            notification_method="web_chat"
         )
         
     except HTTPException:
@@ -356,6 +263,139 @@ async def reject_booking(
         print(f"❌ Unexpected error in reject booking: {e}")
         print(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while rejecting the booking")
+
+
+@router.post("/update-status", response_model=BookingActionResponse)
+async def update_booking_status(
+    request: UpdateBookingStatusRequest,
+    db: Session = Depends(get_db),
+    payment_service: PaymentService = Depends(get_payment_service),
+    message_repo: MessageRepository = Depends(get_message_repository)
+):
+    """
+    Update booking status with optional user notification.
+    
+    This endpoint:
+    1. Updates booking status to the specified value
+    2. Sends user notification ONLY for "Confirmed" and "Cancelled" status
+    3. No notification for "Pending", "Waiting", "Completed", "Expired"
+    4. Returns update status
+    
+    Args:
+        request: Status update request with booking_id, status, and optional notes
+        db: Database session
+        payment_service: Payment service for status updates
+        message_repo: Message repository for notifications
+        
+    Returns:
+        BookingActionResponse with update status and notification info
+        
+    Raises:
+        HTTPException: If booking not found or invalid status
+    """
+    try:
+        booking_repo = BookingRepository()
+        
+        # Validate status
+        valid_statuses = ["Pending", "Waiting", "Confirmed", "Cancelled", "Completed", "Expired"]
+        if request.status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+            )
+        
+        # Get booking
+        booking = booking_repo.get_by_booking_id(db, request.booking_id)
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        customer_user_id = booking.user_id
+        user_notified = False
+        notification_method = None
+        message_content = None
+        
+        # Handle different status updates
+        if request.status == "Confirmed":
+            # Use payment service for confirmation (includes proper message formatting)
+            result = payment_service.verify_payment(
+                db=db,
+                booking_id=request.booking_id,
+                verified_by="admin_panel",
+                verification_notes=request.admin_notes
+            )
+            
+            if not result["success"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=result.get("error", "Failed to confirm booking")
+                )
+            
+            message_content = result["message"]
+            user_notified = True
+            notification_method = "web_chat"
+            
+        elif request.status == "Cancelled":
+            # Use payment service for rejection (includes proper message formatting)
+            rejection_reason = request.rejection_reason or "Booking cancelled by admin"
+            
+            result = payment_service.reject_payment(
+                db=db,
+                booking_id=request.booking_id,
+                reason=rejection_reason,
+                rejected_by="admin_panel"
+            )
+            
+            if not result["success"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=result.get("error", "Failed to cancel booking")
+                )
+            
+            message_content = result["message"]
+            user_notified = True
+            notification_method = "web_chat"
+            
+        else:
+            # For other statuses (Pending, Waiting, Completed, Expired) - just update status
+            booking = booking_repo.update_status(db, request.booking_id, request.status)
+            if not booking:
+                raise HTTPException(status_code=404, detail="Failed to update booking status")
+        
+        # Send notification message if needed
+        if user_notified and message_content:
+            message_repo.save_message(
+                db=db,
+                user_id=customer_user_id,
+                sender="bot",
+                content=message_content,
+                whatsapp_message_id=None
+            )
+        
+        return BookingActionResponse(
+            success=True,
+            message=f"Booking {request.booking_id} status updated to {request.status}",
+            booking_id=request.booking_id,
+            booking_status=request.status,
+            user_notified=user_notified,
+            notification_method=notification_method
+        )
+        
+    except HTTPException:
+        raise
+    except BookingException as e:
+        print(f"❌ Booking error in update status: {e}")
+        raise HTTPException(status_code=400, detail=e.message)
+    except PaymentException as e:
+        print(f"❌ Payment error in update status: {e}")
+        raise HTTPException(status_code=400, detail=e.message)
+    except AppException as e:
+        print(f"❌ Application error in update status: {e}")
+        raise HTTPException(status_code=500, detail=e.message)
+    except Exception as e:
+        import traceback
+        print(f"❌ Unexpected error in update status: {e}")
+        print(f"❌ Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while updating booking status")
 
 
 @router.get("/status/{booking_id}")
