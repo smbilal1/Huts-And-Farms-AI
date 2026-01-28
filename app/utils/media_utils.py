@@ -111,8 +111,15 @@ def remove_cloudinary_links(text: str) -> str:
     # Remove Cloudinary URLs
     text = re.sub(cloudinary_pattern, '', text)
     
-    # Clean up extra whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
+    # Remove empty numbered list items (e.g., "1. \n" becomes empty)
+    text = re.sub(r'\d+\.\s*\n', '', text)
+    
+    # Remove lines that are just numbers and dots
+    text = re.sub(r'^\d+\.\s*$', '', text, flags=re.MULTILINE)
+    
+    # Clean up extra whitespace and newlines
+    text = re.sub(r'\n\s*\n', '\n', text)  # Multiple newlines to single
+    text = re.sub(r'\s+', ' ', text).strip()  # Multiple spaces to single
     
     return text
 
