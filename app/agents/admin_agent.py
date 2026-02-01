@@ -56,9 +56,9 @@ class AdminAgent:
         )
 
         self.agent = create_react_agent(
-            model=self.llm,
-            tools=self.tools,
-            prompt=self.prompt
+            self.llm,
+            self.tools,
+            state_modifier=self.prompt
         )
     
     def convert_messages_to_langchain_format(self, messages: List[Message]) -> List:
