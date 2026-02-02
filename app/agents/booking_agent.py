@@ -5,8 +5,8 @@ from langgraph.prebuilt import create_react_agent
 from datetime import date
 from app.database import SessionLocal
 from app.models import Session, Message
-from langchain_google_genai import ChatGoogleGenerativeAI
-import google.genai as genai
+from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from sqlalchemy import text
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime
@@ -15,7 +15,7 @@ from app.core.config import settings
 
 
 
-client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 # Import refactored agent tools from new structure
 from app.agents.tools.booking_tools import (
@@ -99,15 +99,48 @@ Current Search: {property_type} | {booking_date} | {shift_type} | Price Range: {
 
 ---
 
-🎯 **Required Tools Usage**
-- Always run `check_message_relevance()` before processing queries  
-- Always use `property_id` when calling tools, resolve names first if needed  
+🎯 **CRITICAL: Tool Usage Workflow**
+
+**STEP 1: Check Relevance**
+- ALWAYS call `check_message_relevance()` FIRST for every user message
+- If irrelevant, politely redirect to booking topics
+
+**STEP 2: Understand Intent**
+- Analyze what the user wants based on their message AND session context
+- Check if session already has: property_type, booking_date, shift_type
+
+**STEP 3: Property Name Resolution**
+- If user mentions a property name → MUST call `get_property_id_from_name()` FIRST
+- This stores property_id in session for other tools to use
+- Examples: "White Palace", "Seaside", "farmhouse number 2"
+
+**STEP 4: Execute Appropriate Tool**
+- **Searching properties**: Use `list_properties()` - requires property_type, date, shift_type
+- **Property details**: Use `get_property_details()` - requires property_id (call get_property_id_from_name first!)
+- **Pricing info**: Use `get_property_pricing()` - requires property_id
+- **Images ONLY**: Use `get_property_images()` - requires property_id
+- **Videos ONLY**: Use `get_property_videos()` - requires property_id
+- **Both images AND videos**: Use `get_property_media()` - requires property_id
+- **Creating booking**: Use `create_booking()` - requires all booking details
+- **Payment**: Use `process_payment_details()` or `process_payment_screenshot()`
+
+**STEP 5: Use Session Context Intelligently**
+- If session has property_type but user asks for list → use existing property_type
+- If session has booking_date but user asks for availability → use existing date
+- Don't ask for information that's already in session context
 
 ---
 
 **Response Templates:**  
 - Date Confirmation: "Do you mean [extracted_date] ([day_name])? Please confirm."  
 - Authentication needed: "To view booking details, we first need to verify your contact."  
+- Missing info: "To show you available [farmhouses/huts], I need: [list missing info]"
+
+**Remember**: 
+1. Check chat history to avoid repeating questions
+2. Use session context to remember user preferences
+3. Always resolve property names to IDs before calling property-specific tools
+4. Be conversational but efficient - don't ask for info you already have
 
 Use chat history for context and continuity. Kindly tell me, how can I help you today? 🙏
 """
@@ -115,17 +148,24 @@ Use chat history for context and continuity. Kindly tell me, how can I help you 
 from sqlalchemy import desc
 
 def get_chat_history_normal(user_id: str):
+    """Get formatted chat history with proper role labels."""
     with SessionLocal() as db:
-        
         history = (
             db.query(Message)
             .filter(Message.user_id == user_id)
             .order_by(desc(Message.timestamp))
-            .limit(30)
+            .limit(20)  # Reduced to 20 for better context window management
             .all()
         )
-        # reverse the order to show oldest first (chat style)
-        return [msg.content for msg in reversed(history)]
+        # Format messages with proper role labels
+        formatted_history = []
+        for msg in reversed(history):
+            role = "user" if msg.sender == "user" else "assistant"
+            formatted_history.append({
+                "role": role,
+                "content": msg.content
+            })
+        return formatted_history
 
 
 class BookingToolAgent:
@@ -148,10 +188,10 @@ class BookingToolAgent:
             send_booking_intro
         ]
         
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", 
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini", 
             temperature=0,
-            google_api_key=settings.GOOGLE_API_KEY
+            openai_api_key=settings.OPENAI_API_KEY
         )
 
         self.prompt = ChatPromptTemplate(
@@ -168,24 +208,23 @@ class BookingToolAgent:
         )
 
   
-    def get_embedding(self,text: str, task_type: str = "retrieval_document") -> List[float]:
+    def get_embedding(self, text: str, task_type: str = "retrieval_document") -> List[float]:
         """
-        Generate an embedding for the given text using Google's Gemini embedding model.
+        Generate an embedding for the given text using OpenAI's embedding model.
 
         Args:
             text (str): The text to embed.
-            task_type (str): Either "retrieval_document" or "retrieval_query".
+            task_type (str): Either "retrieval_document" or "retrieval_query" (for compatibility, not used by OpenAI).
 
         Returns:
-            List[float]: A list of embedding floats (3072 dimensions).
+            List[float]: A list of embedding floats (1536 dimensions for text-embedding-3-small).
         """
         try:
-            response = client.models.embed_content(
-                model="models/gemini-embedding-001",
-                content=text,
-                task_type=task_type,
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
             )
-            return response.embedding
+            return response.data[0].embedding
         except Exception as e:
             print(f"[❌] Embedding generation failed: {e}")
             return []
@@ -223,13 +262,13 @@ class BookingToolAgent:
         print(f"client email : {client_email}")
         db.close()
         print(incoming_text)
-        # Run agent with context
+        # Run agent with context - properly format messages
         messages = []
         for msg in chat_history:
-            if msg.startswith("User:"):
-                messages.append(("human", msg[5:]))
-            elif msg.startswith("Assistant:"):
-                messages.append(("assistant", msg[10:]))
+            if msg["role"] == "user":
+                messages.append(("human", msg["content"]))
+            elif msg["role"] == "assistant":
+                messages.append(("assistant", msg["content"]))
         
         # Add current message
         messages.append(("human", incoming_text))

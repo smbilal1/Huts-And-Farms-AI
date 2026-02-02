@@ -22,15 +22,15 @@ class Settings(BaseSettings):
     )
     
     # OpenAI Configuration
-    OPENAI_API_KEY: Optional[str] = Field(
-        None,
-        description="OpenAI API key for GPT models (optional if using Google AI)"
+    OPENAI_API_KEY: str = Field(
+        ...,
+        description="OpenAI API key for GPT models"
     )
     
-    # Google AI Configuration
-    GOOGLE_API_KEY: str = Field(
-        ...,
-        description="Google Generative AI API key for Gemini models"
+    # Google AI Configuration (optional, used for payment screenshot analysis)
+    GOOGLE_API_KEY: Optional[str] = Field(
+        None,
+        description="Google Generative AI API key for Gemini models (optional, used for payment processing)"
     )
     
     # Meta/WhatsApp Configuration
@@ -107,12 +107,12 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} is required for WhatsApp integration")
         return v
     
-    @field_validator("GOOGLE_API_KEY")
+    @field_validator("OPENAI_API_KEY")
     @classmethod
-    def validate_google_api_key(cls, v):
-        """Validate Google API key"""
+    def validate_openai_api_key(cls, v):
+        """Validate OpenAI API key"""
         if not v:
-            raise ValueError("GOOGLE_API_KEY is required for Gemini AI integration")
+            raise ValueError("OPENAI_API_KEY is required for AI agent integration")
         return v
     
     @field_validator("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET")
