@@ -158,7 +158,13 @@ def list_properties(
         
     except Exception as e:
         logger.error(f"Error in list_properties tool: {e}", exc_info=True)
-        return "Error searching properties. Please try again."
+        print(f"🚨 LIST_PROPERTIES ERROR: {e}")
+        print(f"🚨 Error type: {type(e).__name__}")
+        print(f"🚨 Session ID: {session_id}")
+        print(f"🚨 Property type: {property_type}")
+        print(f"🚨 Date: {date}")
+        print(f"🚨 Shift type: {shift_type}")
+        return f"Error searching properties: {str(e)}. Please try again."
     finally:
         db.close()
 

@@ -589,4 +589,25 @@ class BookingToolAgent:
         
         print("="*80)
         
-        return response["messages"][-1].content
+        # Debug the final message extraction
+        final_message = response["messages"][-1]
+        print(f"\n🔍 FINAL MESSAGE DEBUG:")
+        print(f"   Type: {type(final_message).__name__}")
+        print(f"   Content: '{final_message.content}'" if hasattr(final_message, 'content') else "   No content attribute")
+        print(f"   Content length: {len(final_message.content) if hasattr(final_message, 'content') and final_message.content else 0}")
+        
+        # Check if final message is empty, find the last message with content
+        if not hasattr(final_message, 'content') or not final_message.content:
+            print(f"   ⚠️  Final message is empty! Looking for last message with content...")
+            
+            for i in range(len(response["messages"]) - 1, -1, -1):
+                msg = response["messages"][i]
+                if hasattr(msg, 'content') and msg.content and type(msg).__name__ != 'HumanMessage':
+                    print(f"   ✅ Found last content message at index {i}: {type(msg).__name__}")
+                    print(f"   Content preview: '{msg.content[:100]}{'...' if len(msg.content) > 100 else ''}'")
+                    final_message = msg
+                    break
+        
+        print("="*80)
+        
+        return final_message.content if hasattr(final_message, 'content') and final_message.content else "I apologize, but I couldn't generate a proper response. Please try again."

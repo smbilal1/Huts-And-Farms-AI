@@ -442,8 +442,18 @@ async def send_web_message(
         formatted_response = formatting(response_text)
         urls = extract_media_urls(formatted_response)
         
+        # Debug: Print what we extracted
+        print(f"\n🔍 WEB CHAT API DEBUG:")
+        print(f"   Raw agent response: '{response_text[:100]}{'...' if len(response_text) > 100 else ''}'")
+        print(f"   Formatted response: '{formatted_response[:100]}{'...' if len(formatted_response) > 100 else ''}'")
+        print(f"   Extracted URLs: {urls}")
+        
+        # Check if there are actually any media URLs
+        has_media = (urls.get("images") and len(urls.get("images", [])) > 0) or (urls.get("videos") and len(urls.get("videos", [])) > 0)
+        print(f"   Has media: {has_media}")
+        
         # Prepare final message content
-        if urls:
+        if has_media:
             cleaned_response = remove_cloudinary_links(formatted_response)
             final_message_content = cleaned_response.strip()
             
@@ -475,6 +485,9 @@ async def send_web_message(
                         final_message_content = "Here are the images and videos for this property:"
         else:
             final_message_content = formatted_response
+        
+        print(f"   Final message to user: '{final_message_content[:100]}{'...' if len(final_message_content) > 100 else ''}'")
+        print(f"   Media URLs to send: {urls if has_media else 'None'}")
         
         # Save bot message
         bot_message = message_repo.save_message(
