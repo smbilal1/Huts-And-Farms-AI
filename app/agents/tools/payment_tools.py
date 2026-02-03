@@ -75,6 +75,13 @@ def process_payment_screenshot(booking_id: str = None) -> dict:
         # Update booking status to Waiting
         booking_repo.update_status(db, booking_id, "Waiting")
         
+        # Mark state change for memory system
+        from app.agents.memory.state_detector import mark_state_change
+        session_repo = SessionRepository()
+        user_session = session_repo.get_by_user_id(db, booking.user_id)
+        if user_session:
+            mark_state_change(user_session.id, db)
+        
         # Format admin notification message
         admin_message = f"""📸 *Payment Screenshot Received!*
 
@@ -177,8 +184,16 @@ def process_payment_details(
         
         # If successful, send admin notification
         if result.get("success"):
+            # Mark state change for memory system
+            from app.agents.memory.state_detector import mark_state_change
+            session_repo = SessionRepository()
             booking_repo = BookingRepository()
             booking = booking_repo.get_by_booking_id(db, booking_id)
+            
+            if booking:
+                user_session = session_repo.get_by_user_id(db, booking.user_id)
+                if user_session:
+                    mark_state_change(user_session.id, db)
             
             if booking:
                 # Get property name

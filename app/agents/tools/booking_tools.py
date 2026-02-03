@@ -84,6 +84,10 @@ def create_booking(
         if result.get("success"):
             session.booking_id = result["booking_id"]
             db.commit()
+            
+            # Mark state change for memory system
+            from app.agents.memory.state_detector import mark_state_change
+            mark_state_change(session_id, db)
         
         # Return message or error
         if result.get("success"):

@@ -5,12 +5,17 @@ from langgraph.prebuilt import create_react_agent
 from datetime import date
 from app.database import SessionLocal
 from app.models import Session, Message
+from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from sqlalchemy import text
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
 from app.core.config import settings
-from app.agents.llm_factory import get_llm, get_embedding_function
+
+
+
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 # Import refactored agent tools from new structure
 from app.agents.tools.booking_tools import (
@@ -39,11 +44,6 @@ from app.agents.tools.utility_tools import (
     check_message_relevance,
     check_booking_date,
     send_booking_intro
-)
-
-# Import session management tools
-from app.agents.tools.session_tools import (
-    set_booking_preferences
 )
 
 system_prompt = """
@@ -105,14 +105,9 @@ Current Search: {property_type} | {booking_date} | {shift_type} | Price Range: {
 - ALWAYS call `check_message_relevance()` FIRST for every user message
 - If irrelevant, politely redirect to booking topics
 
-**STEP 2: Capture User Preferences**
-- When user mentions property type, date, shift, price, or guests → IMMEDIATELY call `set_booking_preferences()`
-- Examples:
-  * "I want a farmhouse" → set_booking_preferences(property_type="farm")
-  * "15th January, day shift" → set_booking_preferences(booking_date="2026-01-15", shift_type="Day")
-  * "for 10 people under 5000" → set_booking_preferences(max_occupancy=10, max_price=5000)
-- This tool will save preferences AND tell you what's still missing
-- Use the tool's response to guide the conversation
+**STEP 2: Understand Intent**
+- Analyze what the user wants based on their message AND session context
+- Check if session already has: property_type, booking_date, shift_type
 
 **STEP 3: Property Name Resolution**
 - If user mentions a property name → MUST call `get_property_id_from_name()` FIRST
@@ -120,7 +115,6 @@ Current Search: {property_type} | {booking_date} | {shift_type} | Price Range: {
 - Examples: "White Palace", "Seaside", "farmhouse number 2"
 
 **STEP 4: Execute Appropriate Tool**
-- **Setting preferences**: Use `set_booking_preferences()` - when user mentions type/date/shift/price/guests
 - **Searching properties**: Use `list_properties()` - requires property_type, date, shift_type
 - **Property details**: Use `get_property_details()` - requires property_id (call get_property_id_from_name first!)
 - **Pricing info**: Use `get_property_pricing()` - requires property_id
@@ -144,24 +138,39 @@ Current Search: {property_type} | {booking_date} | {shift_type} | Price Range: {
 
 **Remember**: 
 1. Check chat history to avoid repeating questions
-2. Use `set_booking_preferences()` to capture and save user preferences immediately
-3. Use session context to remember user preferences
-4. Always resolve property names to IDs before calling property-specific tools
-5. Be conversational but efficient - don't ask for info you already have
+2. Use session context to remember user preferences
+3. Always resolve property names to IDs before calling property-specific tools
+4. Be conversational but efficient - don't ask for info you already have
 
 Use chat history for context and continuity. Kindly tell me, how can I help you today? 🙏
 """
 
 from sqlalchemy import desc
 
-# Note: get_chat_history_normal() has been replaced by the memory system
-# See app/agents/memory/memory_manager.py for the new implementation
+def get_chat_history_normal(user_id: str):
+    """Get formatted chat history with proper role labels."""
+    with SessionLocal() as db:
+        history = (
+            db.query(Message)
+            .filter(Message.user_id == user_id)
+            .order_by(desc(Message.timestamp))
+            .limit(20)  # Reduced to 20 for better context window management
+            .all()
+        )
+        # Format messages with proper role labels
+        formatted_history = []
+        for msg in reversed(history):
+            role = "user" if msg.sender == "user" else "assistant"
+            formatted_history.append({
+                "role": role,
+                "content": msg.content
+            })
+        return formatted_history
 
 
 class BookingToolAgent:
     def __init__(self):
         self.tools = [
-            set_booking_preferences,
             list_properties,
             get_property_pricing,
             get_property_details,
@@ -179,11 +188,11 @@ class BookingToolAgent:
             send_booking_intro
         ]
         
-        # Get LLM based on configuration
-        self.llm = get_llm(temperature=0)
-        
-        # Get embedding function based on configuration
-        self.embed_fn = get_embedding_function()
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini", 
+            temperature=0,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
 
         self.prompt = ChatPromptTemplate(
             [
@@ -201,18 +210,24 @@ class BookingToolAgent:
   
     def get_embedding(self, text: str, task_type: str = "retrieval_document") -> List[float]:
         """
-        Generate an embedding for the given text using configured LLM provider.
+        Generate an embedding for the given text using OpenAI's embedding model.
 
         Args:
             text (str): The text to embed.
-            task_type (str): Task type hint (used by some providers like Gemini).
+            task_type (str): Either "retrieval_document" or "retrieval_query" (for compatibility, not used by OpenAI).
 
         Returns:
-            List[float]: A list of embedding floats.
-            - OpenAI: 1536 dimensions (text-embedding-3-small)
-            - Gemini: 768 dimensions (embedding-001)
+            List[float]: A list of embedding floats (1536 dimensions for text-embedding-3-small).
         """
-        return self.embed_fn(text)
+        try:
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"[❌] Embedding generation failed: {e}")
+            return []
 
     def get_response(self, incoming_text: str, session_id: str, whatsapp_message_id: Optional[str]= None):
         db = SessionLocal()
@@ -220,6 +235,10 @@ class BookingToolAgent:
 
         # --- Save user message ---
         user_id = session.user.user_id
+        
+        chat_history = []
+        chat_history = get_chat_history_normal(user_id=user_id)
+        print(f"Chat history: {chat_history}")
 
         if incoming_text != "Image received run process_payment_screenshot":
             db.add(Message(
@@ -231,54 +250,28 @@ class BookingToolAgent:
             ))
             db.commit()
 
-        # ========================================
-        # 🧠 MEMORY PREPARATION (NEW)
-        # ========================================
-        from app.agents.memory import prepare_memory
-        
-        # Prepare optimal memory context
-        memory_context = prepare_memory(
-            session_id=session_id,
-            incoming_text=incoming_text,
-            db=db
-        )
-        
-        print(f"🧠 Memory Context:")
-        print(f"  - Summary: {memory_context.summary[:100] if memory_context.summary else 'None'}...")
-        print(f"  - Recent messages: {len(memory_context.recent_messages)}")
-        print(f"  - Session state: {memory_context.session_state}")
-        
-        # ========================================
-        # Extract session context for prompt
-        # ========================================
         cnic = session.user.cnic if session else "None"
         name = session.user.name if session else "None"
         client_email = session.user.email if session else "unauthenticated"
-        property_type = memory_context.session_state.get('property_type') or "None"
-        booking_date = memory_context.session_state.get('booking_date') or "None"
-        shift_type = memory_context.session_state.get('shift_type') or "None"
-        min_price = memory_context.session_state.get('min_price') or "None"
-        max_price = memory_context.session_state.get('max_price') or "None"
-        max_occupancy = memory_context.session_state.get('max_occupancy') or "None"
-        
+        property_type = session.property_type if session else "None"
+        booking_date = session.booking_date if session else "None"
+        shift_type = session.shift_type if session else "None"
+        min_price = session.min_price if session else "None"
+        max_price = session.max_price if session else "None"
+        max_occupancy = session.max_occupancy if session else "None"
         print(f"client email : {client_email}")
+        db.close()
         print(incoming_text)
-        
-        # ========================================
-        # Format messages for agent
-        # ========================================
+        # Run agent with context - properly format messages
         messages = []
-        
-        # Add conversation summary as context (if exists)
-        if memory_context.summary:
-            messages.append(("system", f"📝 Conversation Summary: {memory_context.summary}"))
-        
-        # Add recent messages (last 4 only)
-        for msg in memory_context.recent_messages:
+        for msg in chat_history:
             if msg["role"] == "user":
                 messages.append(("human", msg["content"]))
             elif msg["role"] == "assistant":
                 messages.append(("assistant", msg["content"]))
+        
+        # Add current message
+        messages.append(("human", incoming_text))
         
         # Format the system prompt with session context
         formatted_system_prompt = system_prompt.format(
@@ -311,7 +304,5 @@ class BookingToolAgent:
         response = temp_agent.invoke({
             "messages": messages,
         })
-        
-        db.close()
         print("Agent response:", response)
         return response["messages"][-1].content

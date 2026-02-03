@@ -21,16 +21,22 @@ class Settings(BaseSettings):
         description="PostgreSQL database connection URL"
     )
     
-    # OpenAI Configuration
-    OPENAI_API_KEY: str = Field(
-        ...,
-        description="OpenAI API key for GPT models"
+    # LLM Provider Configuration
+    LLM_PROVIDER: str = Field(
+        default="openai",
+        description="LLM provider to use: 'openai' or 'gemini'"
     )
     
-    # Google AI Configuration (optional, used for payment screenshot analysis)
+    # OpenAI Configuration
+    OPENAI_API_KEY: Optional[str] = Field(
+        None,
+        description="OpenAI API key for GPT models (required if LLM_PROVIDER=openai)"
+    )
+    
+    # Google AI Configuration
     GOOGLE_API_KEY: Optional[str] = Field(
         None,
-        description="Google Generative AI API key for Gemini models (optional, used for payment processing)"
+        description="Google Generative AI API key for Gemini models (required if LLM_PROVIDER=gemini, also used for payment screenshot analysis)"
     )
     
     # Meta/WhatsApp Configuration
@@ -107,12 +113,32 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} is required for WhatsApp integration")
         return v
     
+    @field_validator("LLM_PROVIDER")
+    @classmethod
+    def validate_llm_provider(cls, v):
+        """Validate LLM provider"""
+        if v.lower() not in ["openai", "gemini"]:
+            raise ValueError("LLM_PROVIDER must be either 'openai' or 'gemini'")
+        return v.lower()
+    
     @field_validator("OPENAI_API_KEY")
     @classmethod
-    def validate_openai_api_key(cls, v):
-        """Validate OpenAI API key"""
-        if not v:
-            raise ValueError("OPENAI_API_KEY is required for AI agent integration")
+    def validate_openai_api_key(cls, v, info):
+        """Validate OpenAI API key if using OpenAI provider"""
+        # Get LLM_PROVIDER from values (it's validated first)
+        llm_provider = info.data.get("LLM_PROVIDER", "openai").lower()
+        if llm_provider == "openai" and not v:
+            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+        return v
+    
+    @field_validator("GOOGLE_API_KEY")
+    @classmethod
+    def validate_google_api_key(cls, v, info):
+        """Validate Google API key if using Gemini provider"""
+        # Get LLM_PROVIDER from values (it's validated first)
+        llm_provider = info.data.get("LLM_PROVIDER", "openai").lower()
+        if llm_provider == "gemini" and not v:
+            raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=gemini")
         return v
     
     @field_validator("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET")

@@ -670,6 +670,10 @@ def get_property_id_from_name(session_id: str, property_name: str) -> str:
             property_id=matched_property['property_id']
         )
         
+        # Mark state change for memory system
+        from app.agents.memory.state_detector import mark_state_change
+        mark_state_change(session_id, db)
+        
         return f"✅ Found: *{matched_property['name']}* in _{matched_property['city']}_"
         
     except Exception as e:

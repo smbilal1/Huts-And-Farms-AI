@@ -5,9 +5,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.prebuilt import create_react_agent
 from app.database import SessionLocal
 from app.models import Session, Message
-from langchain_google_genai import ChatGoogleGenerativeAI
-import google.genai as genai
 from app.core.config import settings
+from app.agents.llm_factory import get_llm
 
 import os
 from sqlalchemy import text
@@ -42,11 +41,8 @@ class AdminAgent:
         # ✅ Add the booking tools
         self.tools = [confirm_booking_payment, reject_booking_payment]
 
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash", 
-            temperature=0,
-            google_api_key=settings.GOOGLE_API_KEY
-        )
+        # Get LLM based on configuration
+        self.llm = get_llm(temperature=0)
 
         self.prompt = ChatPromptTemplate(
             [

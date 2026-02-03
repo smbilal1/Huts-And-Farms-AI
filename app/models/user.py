@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Boolean, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -33,6 +33,12 @@ class Session(Base):
     max_price = Column(Integer, nullable=True)  # Maximum
     max_occupancy = Column(Integer, nullable=True)  # Maximum occupancy for the booking
     source = Column(String, nullable=True)  # Session source: Website or Chatbot
+    
+    # Memory management fields
+    conversation_summary = Column(Text, nullable=True)  # Compressed conversation summary
+    summary_updated_at = Column(DateTime, nullable=True)  # When summary was last updated
+    summary_generation_count = Column(Integer, default=0)  # How many times summary has been generated
+    needs_summarization = Column(Boolean, default=False)  # Flag set by tools when state changes
     
     user = relationship("User", backref="sessions")  # Relationship to User model
     property = relationship("Property", backref="sessions")
