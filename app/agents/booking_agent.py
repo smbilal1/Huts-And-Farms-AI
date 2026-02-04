@@ -195,7 +195,7 @@ class BookingToolAgent:
         self.agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=self.prompt
+            state_modifier=self.prompt
         )
 
   
@@ -305,7 +305,7 @@ class BookingToolAgent:
         temp_agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=temp_prompt
+            state_modifier=temp_prompt
         )
         
         response = temp_agent.invoke({
