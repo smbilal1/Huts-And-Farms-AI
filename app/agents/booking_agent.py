@@ -336,10 +336,6 @@ class BookingToolAgent:
         # ========================================
         messages = []
         
-        # Add conversation summary as context (if exists)
-        if memory_context.summary:
-            messages.append(("system", f"📝 Conversation Summary: {memory_context.summary}"))
-        
         # Add recent messages (last 4 only)
         for msg in memory_context.recent_messages:
             if msg["role"] == "user":
@@ -347,7 +343,8 @@ class BookingToolAgent:
             elif msg["role"] == "assistant":
                 messages.append(("assistant", msg["content"]))
         
-        # Format the system prompt with session context
+        # Format the system prompt with session context AND summary
+        # Include summary in system prompt for Gemini compatibility
         formatted_system_prompt = system_prompt.format(
             session_id=session_id,
             name=name,
@@ -359,6 +356,10 @@ class BookingToolAgent:
             max_price=max_price,
             max_occupancy=max_occupancy
         )
+        
+        # Add conversation summary to system prompt if exists (Gemini-compatible)
+        if memory_context.summary:
+            formatted_system_prompt = f"{formatted_system_prompt}\n\n📝 **Conversation Summary**: {memory_context.summary}"
         
         # Create a temporary prompt with the formatted system message
         temp_prompt = ChatPromptTemplate(

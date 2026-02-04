@@ -84,8 +84,11 @@ class BookingRepository(BaseRepository[Booking]):
         """
         Check if a property is available for booking on a specific date and shift.
         
-        A property is considered unavailable if there's an existing booking
-        with status 'Pending' or 'Confirmed' for the same date and shift.
+        Handles complex shift conflicts:
+        - Full Day: Conflicts with Day, Night, Full Day on same date, and Full Night on same/previous date
+        - Full Night: Conflicts with Night on same date, Day on next date, Full Day on same/next date, Full Night on same date
+        - Day: Conflicts with Day, Full Day on same date, Full Night on previous date
+        - Night: Conflicts with Night, Full Day on same date, Full Night on same date
         
         Args:
             db: Database session
@@ -96,16 +99,109 @@ class BookingRepository(BaseRepository[Booking]):
         Returns:
             True if property is available, False if already booked
         """
-        existing_booking = db.query(Booking).filter(
-            and_(
-                Booking.property_id == property_id,
-                Booking.booking_date == booking_date,
-                Booking.shift_type == shift_type,
-                Booking.status.in_(["Pending", "Confirmed"])
-            )
-        ).first()
+        from datetime import timedelta
         
-        return existing_booking is None
+        # Define conflict rules for each shift type
+        if shift_type == "Full Day":
+            # Full Day = Day + Night on same date
+            # Conflicts with: Day, Night, Full Day on same date
+            # Also conflicts with: Full Night on same date or previous date
+            next_date = booking_date + timedelta(days=1)
+            
+            conflicting_bookings = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.status.in_(["Pending", "Confirmed"]),
+                    and_(
+                        Booking.booking_date == booking_date,
+                        Booking.shift_type.in_(["Day", "Night", "Full Day", "Full Night"])
+                    )
+                )
+            ).first()
+            
+            return conflicting_bookings is None
+            
+        elif shift_type == "Full Night":
+            # Full Night = Night on booking_date + Day on next_date
+            # Conflicts with:
+            #   - Night, Full Day, Full Night on booking_date
+            #   - Day, Full Day on next_date
+            #   - Full Night on previous date (which extends to booking_date's Day)
+            next_date = booking_date + timedelta(days=1)
+            prev_date = booking_date - timedelta(days=1)
+            
+            # Check booking_date for Night, Full Day, Full Night
+            conflict_same_date = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.booking_date == booking_date,
+                    Booking.shift_type.in_(["Night", "Full Day", "Full Night"]),
+                    Booking.status.in_(["Pending", "Confirmed"])
+                )
+            ).first()
+            
+            if conflict_same_date:
+                return False
+            
+            # Check next_date for Day, Full Day, Full Night
+            conflict_next_date = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.booking_date == next_date,
+                    Booking.shift_type.in_(["Day", "Full Day", "Full Night"]),
+                    Booking.status.in_(["Pending", "Confirmed"])
+                )
+            ).first()
+            
+            return conflict_next_date is None
+            
+        elif shift_type == "Day":
+            # Day shift conflicts with:
+            #   - Day, Full Day on same date
+            #   - Full Night on previous date (which extends to this Day)
+            prev_date = booking_date - timedelta(days=1)
+            
+            # Check same date
+            conflict_same_date = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.booking_date == booking_date,
+                    Booking.shift_type.in_(["Day", "Full Day"]),
+                    Booking.status.in_(["Pending", "Confirmed"])
+                )
+            ).first()
+            
+            if conflict_same_date:
+                return False
+            
+            # Check previous date for Full Night
+            conflict_prev_night = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.booking_date == prev_date,
+                    Booking.shift_type == "Full Night",
+                    Booking.status.in_(["Pending", "Confirmed"])
+                )
+            ).first()
+            
+            return conflict_prev_night is None
+            
+        elif shift_type == "Night":
+            # Night shift conflicts with:
+            #   - Night, Full Day, Full Night on same date
+            conflicting_bookings = db.query(Booking).filter(
+                and_(
+                    Booking.property_id == property_id,
+                    Booking.booking_date == booking_date,
+                    Booking.shift_type.in_(["Night", "Full Day", "Full Night"]),
+                    Booking.status.in_(["Pending", "Confirmed"])
+                )
+            ).first()
+            
+            return conflicting_bookings is None
+        
+        # Fallback for unknown shift types
+        return False
     
     def update_status(
         self,

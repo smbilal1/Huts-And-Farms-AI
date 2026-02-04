@@ -143,18 +143,130 @@ class PropertyRepository(BaseRepository[Property]):
             
             # Check if property is already booked (unless include_booked is True)
             if not include_booked:
-                booking_sql = """
-                    SELECT 1 FROM bookings
-                    WHERE property_id = :pid AND booking_date = :date
-                    AND shift_type = :shift AND status IN ('Pending', 'Confirmed')
-                """
-                booking = db.execute(text(booking_sql), {
-                    "pid": property_id,
-                    "date": booking_date.date(),
-                    "shift": shift_type
-                }).first()
+                # Use complex conflict checking based on shift type
+                from datetime import timedelta
                 
-                if booking:
+                is_available = True
+                
+                if shift_type == "Full Day":
+                    # Full Day = Day + Night on same date
+                    # Conflicts with: Day, Night, Full Day, Full Night on same date
+                    # Also conflicts with: Full Night on previous date (extends to current Day)
+                    prev_date = (booking_date - timedelta(days=1)).date()
+                    
+                    # Check same date
+                    booking_sql_same = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :date
+                        AND shift_type IN ('Day', 'Night', 'Full Day', 'Full Night')
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_same = db.execute(text(booking_sql_same), {
+                        "pid": property_id,
+                        "date": booking_date.date()
+                    }).first()
+                    
+                    # Check previous date for Full Night
+                    booking_sql_prev = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :prev_date
+                        AND shift_type = 'Full Night'
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_prev = db.execute(text(booking_sql_prev), {
+                        "pid": property_id,
+                        "prev_date": prev_date
+                    }).first()
+                    
+                    if booking_same or booking_prev:
+                        is_available = False
+                        
+                elif shift_type == "Full Night":
+                    # Full Night = Night on booking_date + Day on next_date
+                    next_date = (booking_date + timedelta(days=1)).date()
+                    
+                    # Check booking_date for Night, Full Day, Full Night
+                    booking_sql_same = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :date
+                        AND shift_type IN ('Night', 'Full Day', 'Full Night')
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_same = db.execute(text(booking_sql_same), {
+                        "pid": property_id,
+                        "date": booking_date.date()
+                    }).first()
+                    
+                    # Check next_date for Day, Full Day, Full Night
+                    booking_sql_next = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :next_date
+                        AND shift_type IN ('Day', 'Full Day', 'Full Night')
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_next = db.execute(text(booking_sql_next), {
+                        "pid": property_id,
+                        "next_date": next_date
+                    }).first()
+                    
+                    if booking_same or booking_next:
+                        is_available = False
+                        
+                elif shift_type == "Day":
+                    # Day conflicts with: Day, Full Day on same date, Full Night on previous date
+                    prev_date = (booking_date - timedelta(days=1)).date()
+                    
+                    # Check same date
+                    booking_sql_same = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :date
+                        AND shift_type IN ('Day', 'Full Day')
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_same = db.execute(text(booking_sql_same), {
+                        "pid": property_id,
+                        "date": booking_date.date()
+                    }).first()
+                    
+                    # Check previous date for Full Night
+                    booking_sql_prev = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :prev_date
+                        AND shift_type = 'Full Night'
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking_prev = db.execute(text(booking_sql_prev), {
+                        "pid": property_id,
+                        "prev_date": prev_date
+                    }).first()
+                    
+                    if booking_same or booking_prev:
+                        is_available = False
+                        
+                elif shift_type == "Night":
+                    # Night conflicts with: Night, Full Day, Full Night on same date
+                    booking_sql = """
+                        SELECT 1 FROM bookings
+                        WHERE property_id = :pid 
+                        AND booking_date = :date
+                        AND shift_type IN ('Night', 'Full Day', 'Full Night')
+                        AND status IN ('Pending', 'Confirmed')
+                    """
+                    booking = db.execute(text(booking_sql), {
+                        "pid": property_id,
+                        "date": booking_date.date()
+                    }).first()
+                    
+                    if booking:
+                        is_available = False
+                
+                if not is_available:
                     continue  # Skip already booked properties
             
             available_properties.append({

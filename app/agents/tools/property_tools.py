@@ -399,7 +399,7 @@ def get_property_media(session_id: str) -> str:
         db.close()
 
 
-@tool("get_property_images")
+@tool("get_property_images",return_direct=True)
 def get_property_images(session_id: str) -> str:
     """
     Get ONLY image URLs for a specific property.
@@ -471,7 +471,7 @@ def get_property_images(session_id: str) -> str:
         db.close()
 
 
-@tool("get_property_videos")
+@tool("get_property_videos",return_direct=True)
 def get_property_videos(session_id: str) -> str:
     """
     Get ONLY video URLs for a specific property.
