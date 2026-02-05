@@ -34,20 +34,20 @@ def _get_notification_service() -> NotificationService:
 @tool("process_payment_screenshot", return_direct=True)
 def process_payment_screenshot(booking_id: str = None) -> dict:
     """
-    Process payment screenshot for a booking.
-    If no booking ID is provided, return False.
-    Else, return Payment details.
-    
-    This tool:
-    1. Updates booking status to "Waiting"
-    2. Sends notification to admin for verification
-    3. Sends confirmation to customer
-    
-    Args:
-        booking_id: The booking ID to process payment for
-        
-    Returns:
-        Payment processing status and verification message
+    Process payment screenshot.
+
+    CALL: booking_id + screenshot/payment proof received
+    NO CALL: payment instructions | booking confirm/reject | missing booking_id
+
+    REQ:
+    • booking_id valid
+    • booking status Pending or awaiting payment
+
+    SENSITIVE: contains CNIC + phone → never echo sensitive data externally
+
+    RETURNS:
+    ok {admin_message}
+    err {error}
     """
     if not booking_id:
         return False
@@ -149,23 +149,20 @@ def process_payment_details(
     sender_phone: Optional[str] = None
 ) -> dict:
     """
-    Process manual payment details when user provides transaction info via text.
-    Use when user gives payment information like:
-    - "Transaction ID: TXN123456"
-    - "I paid 5000 rupees"
-    - "My transaction ID is ABC123"
-    - Provides payment details in text format
-    
-    Args:
-        session_id: Current session ID
-        booking_id: Booking ID for payment
-        transaction_id: Payment transaction/reference ID (optional)
-        sender_name: Name of person who made payment
-        amount: Amount paid
-        sender_phone: Phone number of sender (optional)
-        
-    Returns:
-        Verification status and next steps
+    Process payment details.
+
+    CALL: booking_id + transaction/payment details provided
+    NO CALL: screenshot upload | booking confirm/reject | missing booking_id
+
+    REQ:
+    • booking_id valid
+    • at least one payment detail (transaction_id | sender_name | amount | sender_phone)
+
+    SENSITIVE: payment + identity data → never echo full sensitive fields
+
+    RETURNS:
+    ok {success, payment_details?}
+    err {error}
     """
     db = SessionLocal()
     try:
@@ -238,15 +235,18 @@ To reject : reject `{booking_id}` [reason]
 @tool("confirm_booking_payment")
 def confirm_booking_payment(booking_id: str) -> dict:
     """
-    Confirm booking after admin verification (internal use).
-    Admin Agent can call this tool to confirm a booking after verifying payment.
-    Returns customer_phone and message for webhook to send to customer.
-    
-    Args:
-        booking_id: The booking ID to confirm
-        
-    Returns:
-        Confirmation status and customer notification
+    Confirm booking payment.
+
+    CALL: booking_id + admin verification success
+    NO CALL: user queries | payment submission | missing booking_id
+
+    REQ:
+    • booking_id valid
+    • payment verified by admin/internal agent
+
+    RETURNS:
+    ok {customer_phone, customer_user_id, message, already_confirmed}
+    err {error}
     """
     db = SessionLocal()
     try:
@@ -340,17 +340,18 @@ _For any queries, feel free to message us._"""
 @tool("reject_booking_payment")
 def reject_booking_payment(booking_id: str, reason: str = None) -> dict:
     """
-    Reject booking payment after admin review (internal use).
-    This is called automatically when admin rejects payment.
-    Make sure the reason is formatted and explained clearly.
-    Returns customer_phone and message for webhook to send to customer.
-    
-    Args:
-        booking_id: The booking ID to reject
-        reason: Reason for rejection (e.g., amount_mismatch, transaction_not_found)
-        
-    Returns:
-        Rejection status and customer notification
+    Reject booking payment.
+
+    CALL: booking_id + admin rejection + reason
+    NO CALL: user queries | payment submission | missing reason
+
+    REQ:
+    • booking_id valid
+    • reason required
+
+    RETURNS:
+    ok {customer_phone, customer_user_id, message, booking_status, reason}
+    err {error}
     """
     db = SessionLocal()
     try:

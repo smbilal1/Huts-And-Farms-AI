@@ -10,17 +10,15 @@ import calendar
 @tool("check_message_relevance")
 def check_message_relevance(user_message: str) -> dict:
     """
-    Check if user message is relevant to farmhouse/hut booking.
-    
-    Args:
-        user_message: User's input message
-    
-    Returns:
-        {
-            "is_relevant": bool,
-            "category": "booking|greeting|irrelevant|creator_question",
-            "redirect_message": str (if irrelevant)
-        }
+    CALL: always check if user message relates to bookings
+    NO CALL: never for internal system messages
+
+    REQ:
+    • user_message (string)
+
+    RETURNS:
+    ok {is_relevant, category, optional redirect_message}
+    err {rare - not applicable}
     """
     # Simple implementation - can be enhanced with NLP
     booking_keywords = [
@@ -55,15 +53,16 @@ def check_message_relevance(user_message: str) -> dict:
         "redirect_message": None
     }
 
-
 @tool("send_booking_intro")
 def send_booking_intro() -> str:
     """
-    Send a formatted WhatsApp introduction message explaining the booking process.
-    Use this when greeting new users or when they need guidance on how to book.
-    
-    Returns:
-        Formatted WhatsApp message with booking instructions
+    CALL: greeting new user or explaining booking process
+    NO CALL: specific booking queries, media requests
+
+    REQ: none
+
+    RETURNS:
+    ok {formatted WhatsApp intro message}
     """
 
     message = """
@@ -92,20 +91,17 @@ def send_booking_intro() -> str:
 @tool("check_booking_date")
 def check_booking_date(day: int, month: int = None, year: int = None) -> dict:
     """
-    Validate booking date based on current date and booking constraints.
-    Only allows booking for current month and next month.
-    
-    Args:
-        day: Day of the month (1-31)
-        month: Month (1-12, optional - defaults to current month)
-        year: Year (optional - defaults to current year)
-    
-    Returns:
-        {
-            "is_valid": bool,
-            "message": str,
-            "date_info": dict (if valid)
-        }
+    CALL: validate a user-provided date
+    NO CALL: unrelated messages
+
+    REQ:
+    • day (int)
+    • month (optional, defaults to current)
+    • year (optional, defaults to current)
+
+    RETURNS:
+    ok {is_valid: True, formatted date info}
+    err {is_valid: False, message explaining invalidity}
     """
     # Get current date information
     current_date = datetime.now()

@@ -41,24 +41,18 @@ def list_properties(
     max_occupancy: Optional[int] = None,
 ) -> dict:
     """
-    Search and filter available properties for booking.
+    CALL: user has provided or session has property_type, date, shift_type
+    NO CALL: missing required info, session not found
 
-    REQUIRED:
-        - property_type
-        - date
-        - shift_type
-    
-    PARAMETERS:
-        session_id       : Unique identifier for the user session.
-        property_type    : Category/type of property to filter by (hut/farm).
-        city             : City where the property is located (default: "Karachi").
-        country          : Country where the property is located (default: "Pakistan").
-        date             : Booking date in YYYY-MM-DD format.
-        day_of_the_week  : Optional. Specific day of week (auto-filled from `date` if None).
-        shift_type       : Type of booking shift (Day, Night, Full Day, Full Night).
-        min_price        : Minimum price filter.
-        max_price        : Maximum price filter.
-        max_occupancy    : Maximum occupancy filter.
+    REQ:
+    • session_id
+    • property_type (hut/farm)
+    • date (YYYY-MM-DD)
+    • shift_type (Day, Night, Full Day, Full Night)
+
+    RETURNS:
+    ok {formatted list of available properties with price}
+    err {error message or prompt for missing info}
     """
     db = SessionLocal()
     try:
@@ -166,22 +160,15 @@ def list_properties(
 @tool("get_property_pricing")
 def get_property_pricing(session_id: str) -> str:
     """
-    Get ONLY the pricing information for a property.
-    
-    Use this tool when the user specifically asks about:
-    - "What is the price?"
-    - "How much does it cost?"
-    - "What are the rates?"
-    - "Price for different days/shifts"
-    
-    This returns pricing breakdown by day and shift type only.
-    For full property details (address, amenities, description), use get_property_info instead.
-    
-    Args:
-        session_id: Session ID containing the property_id
-        
-    Returns:
-        Pricing information formatted by day and shift
+    CALL: user asks about pricing specifically
+    NO CALL: general property details, images/videos
+
+    REQ:
+    • session_id with property_id
+
+    RETURNS:
+    ok {pricing breakdown by day and shift}
+    err {error message}
     """
     db = SessionLocal()
     try:
@@ -240,25 +227,15 @@ def get_property_pricing(session_id: str) -> str:
 @tool("get_property_details")
 def get_property_details(session_id: str) -> str:
     """
-    Get detailed information about a property including address, amenities, description, and capacity.
-    
-    Use this tool when the user asks about:
-    - "Tell me about this property"
-    - "What amenities does it have?"
-    - "Where is it located?"
-    - "What's the address?"
-    - "What facilities are available?"
-    - "How many people can stay?"
-    - "Show me details"
-    
-    This returns property details WITHOUT pricing.
-    For pricing information, use get_property_pricing instead.
-    
-    Args:
-        session_id: Session ID containing the property_id
-        
-    Returns:
-        Property information including location, amenities, description, capacity
+    CALL: user asks for property info (location, amenities, description)
+    NO CALL: pricing-only queries
+
+    REQ:
+    • session_id with property_id
+
+    RETURNS:
+    ok {detailed property info without pricing}
+    err {error message}
     """
     db = SessionLocal()
     try:
@@ -317,21 +294,15 @@ def get_property_details(session_id: str) -> str:
 @tool("get_property_media")
 def get_property_media(session_id: str) -> str:
     """
-    Get all media (images and videos) for a specific property.
-    
-    Use this tool when the user asks for:
-    - "Show me images and videos"
-    - "Show me all media"
-    - "Show me pictures and videos"
-    - Both images and videos together
-    
-    Returns a combined message with both images and videos.
-    
-    Args:
-        session_id: Session ID containing the property_id
-        
-    Returns:
-        Message with both image and video URLs or error message
+    CALL: user asks for both images and videos
+    NO CALL: images-only or videos-only
+
+    REQ:
+    • session_id with property_id
+
+    RETURNS:
+    ok {combined message with image and video URLs}
+    err {error message}
     """
     db = SessionLocal()
     try:
@@ -402,20 +373,15 @@ def get_property_media(session_id: str) -> str:
 @tool("get_property_images",return_direct=True)
 def get_property_images(session_id: str) -> str:
     """
-    Get ONLY image URLs for a specific property.
-    
-    Use this tool when the user asks SPECIFICALLY for images only:
-    - "Show me images" (without mentioning videos)
-    - "Show me pictures" (without mentioning videos)
-    - "Show me photos" (without mentioning videos)
-    
-    If user asks for both images AND videos, use get_property_media instead.
-    
-    Args:
-        session_id: Session ID containing the property_id
-        
-    Returns:
-        Message with image URLs or error message
+    CALL: user asks for images only
+    NO CALL: user asks for videos or both media
+
+    REQ:
+    • session_id with property_id
+
+    RETURNS:
+    ok {image URLs}
+    err {error message}
     """
     db = SessionLocal()
     try:
@@ -474,19 +440,15 @@ def get_property_images(session_id: str) -> str:
 @tool("get_property_videos",return_direct=True)
 def get_property_videos(session_id: str) -> str:
     """
-    Get ONLY video URLs for a specific property.
-    
-    Use this tool when the user asks SPECIFICALLY for videos only:
-    - "Show me videos" (without mentioning images)
-    - "Show me video tour" (without mentioning images)
-    
-    If user asks for both images AND videos, use get_property_media instead.
-    
-    Args:
-        session_id: Session ID containing the property_id
-        
-    Returns:
-        Message with video URLs or error message
+    CALL: user asks for videos only
+    NO CALL: user asks for images or both media
+
+    REQ:
+    • session_id with property_id
+
+    RETURNS:
+    ok {video URLs}
+    err {error message}
     """
     db = SessionLocal()
     try:
@@ -579,21 +541,16 @@ def _fuzzy_match_property_name(search_name: str, property_names: List[Dict]) -> 
 @tool("get_property_id_from_name")
 def get_property_id_from_name(session_id: str, property_name: str) -> str:
     """
-    Get the unique property_id using the property name with fuzzy matching.
-    
-    This tool uses fuzzy matching to find properties even if the name is slightly misspelled.
-    It will search within the property type (hut/farm) if already selected in the session,
-    or search all properties if no type is selected yet.
-    
-    IMPORTANT: This tool should ALWAYS be called FIRST when a user mentions a property name,
-    before calling any other property tools like get_property_details, get_property_pricing, etc.
-    
-    Args:
-        session_id: Session ID to store the property_id
-        property_name: Name of the property to search for (fuzzy matching enabled)
-        
-    Returns:
-        Success message with property details or error message
+    CALL: user provides property name (exact or fuzzy)
+    NO CALL: any other property queries before providing name
+
+    REQ:
+    • session_id
+    • property_name (string)
+
+    RETURNS:
+    ok {success message with property found}
+    err {no match or error message}
     """
     db = SessionLocal()
     try:

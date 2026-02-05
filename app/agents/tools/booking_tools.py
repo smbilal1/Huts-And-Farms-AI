@@ -32,22 +32,21 @@ def create_booking(
     user_name: Optional[str] = None
 ) -> dict:
     """
-    Create a new property booking when user wants to book, reserve, or rent a property/farm/venue.
-    Use this when user says they want to book, reserve, rent, or says phrases like:
-    - "I want to book a farm/property"
-    - "Book karna hai", "farm book krna hai"
-    - "Reserve this property"
-    - "I want this venue"
-    - "Book kar do"
-    
-    Args:
-        session_id: Current chat session ID
-        user_name: Customer's full name
-        booking_date: Date in YYYY-MM-DD format
-        shift_type: "Day", "Night", "Full Day", or "Full Night"
-        cnic: Customer's CNIC number
-    
-    Returns booking confirmation with payment instructions.
+    Create booking.
+
+    CALL: property_id + date + shift + intent
+    NO CALL: browse | compare | price | availability
+
+    REQ:
+    • booking_date YYYY-MM-DD future
+    • shift_type Day|Night|Full Day|Full Night
+    • property_id in session
+
+    SENSITIVE: CNIC collect post-intent, never echo
+
+    RETURNS:
+    ok {booking_reference, payment_amount, payment_instructions}
+    err {error}
     """
     db = SessionLocal()
     try:
@@ -106,18 +105,17 @@ def create_booking(
 @tool("check_booking_status")
 def check_booking_status(booking_id: str) -> dict:
     """
-    Check current status of any booking when user asks about their booking.
-    Use when user wants to:
-    - Check booking status
-    - "Mera booking ka status kya hai"
-    - "Is my booking confirmed?"
-    - "What's the status of my reservation?"
-    - Asks about their booking progress
-    
-    Args:
-        booking_id: The booking ID to check
-        
-    Returns current booking status and details.
+    Check booking status.
+
+    CALL: booking_id + status/progress query
+    NO CALL: create booking | browse | price | availability | missing booking_id
+
+    REQ:
+    • booking_id valid and exists
+
+    RETURNS:
+    ok {status, message, booking_id, needs_payment, property_name, amount}
+    err {error}
     """
     db = SessionLocal()
     try:
@@ -153,19 +151,21 @@ def check_booking_status(booking_id: str) -> dict:
 @tool("get_user_bookings")
 def get_user_bookings(session_id: str, cnic: Optional[str] = None, limit: int = 5) -> dict:
     """
-    Get user's recent bookings when they ask about their bookings.
-    Use when user asks:
-    - "Show my bookings"
-    - "Mere bookings dikhao"
-    - "What are my reservations?"
-    - "My booking history"
-    
-    Args:
-        session_id: Current session ID to identify user
-        cnic: User's CNIC for verification
-        limit: Maximum number of bookings to return
-        
-    Returns user's recent bookings list.
+    Get user bookings.
+
+    CALL: user bookings/history query + verified user/session
+    NO CALL: booking status by ID | create booking | browse | missing verification
+
+    REQ:
+    • valid session with user_id
+    • CNIC required if user not already verified
+    • limit: positive integer
+
+    SENSITIVE: verify CNIC, never echo full CNIC
+
+    RETURNS:
+    ok {message, bookings_count}
+    err {error}
     """
     db = SessionLocal()
     try:
@@ -260,18 +260,18 @@ Ready to make your first booking? Just tell me what kind of property you're look
 @tool("get_payment_instructions")
 def get_payment_instructions(booking_id: str) -> dict:
     """
-    Get payment instructions for pending bookings when user asks how to pay.
-    Use when user asks:
-    - "How do I pay?"
-    - "Payment kaise karu?"
-    - "What are payment details?"
-    - "Where to send money?"
-    - Needs payment guidance
-    
-    Args:
-        booking_id: Booking ID needing payment
-        
-    Returns detailed payment instructions.
+    Get payment instructions.
+
+    CALL: booking_id + payment/how to pay query + pending booking
+    NO CALL: booking confirmed/cancelled/completed | browse | missing booking_id
+
+    REQ:
+    • booking_id valid
+    • booking status must be Pending
+
+    RETURNS:
+    ok {message, amount, easypaisa_number}
+    err {error}
     """
     db = SessionLocal()
     try:

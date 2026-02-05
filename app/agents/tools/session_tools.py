@@ -29,34 +29,16 @@ def set_booking_preferences(
     max_occupancy: Optional[int] = None
 ) -> str:
     """
-    Update user's booking preferences in the session.
-    
-    Use this tool when user mentions ANY of these preferences:
-    - Property type: "I want a hut", "farmhouse chahiye", "show me farms"
-    - Date: "15th January", "next Sunday", "2026-01-20"
-    - Shift: "day shift", "night", "full day"
-    - Price: "under 5000", "between 3000 and 8000"
-    - Guests: "for 10 people", "20 guests"
-    
-    The tool will:
-    1. Save the provided preferences
-    2. Ask for missing required information (property_type, date, shift)
-    3. When all required fields are complete, instruct you to call list_properties()
-    
-    IMPORTANT: After this tool returns "call list_properties()", you MUST immediately 
-    call list_properties() to show the user available properties.
-    
-    Args:
-        session_id: Session ID
-        property_type: "hut" or "farm" (optional)
-        booking_date: Date in YYYY-MM-DD format (optional)
-        shift_type: "Day", "Night", "Full Day", or "Full Night" (optional)
-        min_price: Minimum price in PKR (optional)
-        max_price: Maximum price in PKR (optional)
-        max_occupancy: Number of guests (optional)
-        
-    Returns:
-        Message asking for missing info OR instruction to call list_properties()
+    CALL: user provides preferences (property type, date, shift, price, guests)
+    NO CALL: unrelated messages or already complete session
+
+    REQ:
+    • session_id
+    • any optional fields: property_type, booking_date, shift_type, min_price, max_price, max_occupancy
+
+    RETURNS:
+    ok {message asking for missing info OR instruction to call list_properties}
+    err {error updating preferences}
     """
     db = SessionLocal()
     try:
