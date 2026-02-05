@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -14,6 +14,7 @@ class Message(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     sender = Column(String(10))  # "user" or "bot"
     content = Column(Text)
+    structured_response = Column(JSON, nullable=True)  # Store structured responses for frontend
 
     timestamp = Column(DateTime, default=datetime.utcnow)
     whatsapp_message_id = Column(String(100), nullable=True)

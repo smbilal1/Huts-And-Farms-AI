@@ -7,7 +7,7 @@ message sending, image uploads, chat history, and session management.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -29,6 +29,7 @@ from app.repositories.user_repository import UserRepository
 from app.repositories.session_repository import SessionRepository
 from app.agents.booking_agent import BookingToolAgent
 from app.agents.admin_agent import AdminAgent
+from app.core.response_formatter import ResponseFormatterAgent
 from app.core.constants import WEB_ADMIN_USER_ID
 from app.core.exceptions import (
     AppException,
@@ -48,6 +49,7 @@ router = APIRouter(prefix="/web-chat", tags=["web-chat"])
 # Lazy initialization - agents will be created when first needed
 _booking_agent = None
 _admin_agent = None
+_formatter_agent = None
 
 def get_booking_agent():
     """Get or create the booking agent instance."""
@@ -62,6 +64,13 @@ def get_admin_agent():
     if _admin_agent is None:
         _admin_agent = AdminAgent()
     return _admin_agent
+
+def get_formatter_agent():
+    """Get or create the formatter agent instance."""
+    global _formatter_agent
+    if _formatter_agent is None:
+        _formatter_agent = ResponseFormatterAgent()
+    return _formatter_agent
 
 
 # ==================== Request Models ====================
@@ -94,11 +103,15 @@ class MessageResponse(BaseModel):
     sender: str
     timestamp: datetime
     media_urls: Optional[Dict[str, List[str]]] = None
+    structured_response: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatResponse(BaseModel):
     """Response model for chat operations."""
     status: str
+    responses: Optional[List[Dict[str, Any]]] = None
+    response_count: Optional[int] = None
+    # Legacy fields for backward compatibility
     bot_response: Optional[str] = None
     media_urls: Optional[Dict[str, List[str]]] = None
     message_id: Optional[int] = None
@@ -410,86 +423,83 @@ async def send_web_message(
         
         session_id = session_result["session_id"]
         
-        # Get bot response
+        # Get bot response (raw text)
         booking_agent = get_booking_agent()
-        agent_response = booking_agent.get_response(
+        raw_response = booking_agent.get_response(
             incoming_text=incoming_text,
             session_id=session_id,
             whatsapp_message_id=None  # Not applicable for web
         )
         
-        # Extract response content - agent should return clean text
-        # Handle different response types
-        if isinstance(agent_response, str):
-            response_text = agent_response.strip()
-        elif isinstance(agent_response, list) and len(agent_response) > 0:
-            # If it's a list, try to extract text from the first item
-            first_item = agent_response[0]
-            if isinstance(first_item, dict) and 'text' in first_item:
-                response_text = first_item['text'].strip()
-            elif isinstance(first_item, dict) and 'content' in first_item:
-                response_text = first_item['content'].strip()
-            else:
-                response_text = str(first_item).strip()
-        elif hasattr(agent_response, 'content'):
-            # If it has a content attribute
-            response_text = agent_response.content.strip()
-        else:
-            # Fallback to string conversion
-            response_text = str(agent_response).strip()
+        print("\n" + "="*80)
+        print("🌐 WEB CHAT API - RECEIVED FROM BOOKING AGENT")
+        print("="*80)
+        print(f"User Message: {incoming_text}")
+        print(f"Raw Response Length: {len(raw_response)} characters")
+        print("="*80 + "\n")
         
-        # Format response
-        formatted_response = formatting(response_text)
-        urls = extract_media_urls(formatted_response)
+        # Format response using separate formatter agent
+        formatter_agent = get_formatter_agent()
+        structured_response = formatter_agent.format_response(raw_response)
         
-        # Prepare final message content
-        if urls:
-            cleaned_response = remove_cloudinary_links(formatted_response)
-            final_message_content = cleaned_response.strip()
+        print("\n" + "="*80)
+        print("🌐 WEB CHAT API - RECEIVED FROM FORMATTER AGENT")
+        print("="*80)
+        print(f"Structured Response Status: {structured_response.get('status')}")
+        print(f"Response Count: {structured_response.get('response_count')}")
+        print("="*80 + "\n")
+        
+        # Extract main message for saving to database (combine all main messages)
+        main_messages = []
+        all_media_urls = {"images": [], "videos": []}
+        
+        for response_item in structured_response.get("responses", []):
+            if "main_message" in response_item:
+                main_messages.append(response_item["main_message"])
             
-            # If the cleaned response is empty or just whitespace, provide a default message
-            if not final_message_content or final_message_content.isspace():
-                # Check if we have both images and videos
-                has_images = urls.get("images") and len(urls.get("images", [])) > 0
-                has_videos = urls.get("videos") and len(urls.get("videos", [])) > 0
-                
-                if has_images and has_videos:
-                    final_message_content = "Here are the images and videos for this property:"
-                elif has_images:
-                    final_message_content = "Here are the images for this property:"
-                elif has_videos:
-                    final_message_content = "Here are the videos for this property:"
-                else:
-                    final_message_content = "Here is the media for this property:"
-            else:
-                # Check if the response mentions both images and videos separately
-                # and replace with combined message if property name is available
-                if "Here are the images for" in final_message_content and "And here are the videos:" in final_message_content:
-                    # Extract property name from the response
-                    import re
-                    match = re.search(r"Here are the images for ([^:]+):", final_message_content)
-                    if match:
-                        property_name = match.group(1).strip()
-                        final_message_content = f"Here are the images and videos of {property_name}:"
-                    else:
-                        final_message_content = "Here are the images and videos for this property:"
-        else:
-            final_message_content = formatted_response
+            # Collect media URLs for legacy support
+            if response_item.get("type") == "media" and "media" in response_item:
+                media = response_item["media"]
+                if media.get("images"):
+                    all_media_urls["images"].extend(media["images"])
+                if media.get("videos"):
+                    all_media_urls["videos"].extend(media["videos"])
         
-        # Save bot message
+        # Combine main messages for database storage
+        combined_message = "\n\n".join(main_messages) if main_messages else raw_response
+        
+        # Save bot message with structured response
         bot_message = message_repo.save_message(
             db=db,
             user_id=user_id,
             sender="bot",
-            content=final_message_content,
+            content=combined_message,
             whatsapp_message_id=None
         )
         
+        # Update the message with structured response data
+        bot_message.structured_response = structured_response.get("responses")
+        db.commit()
+        
+        print("\n" + "="*80)
+        print("📤 WEB CHAT API - SENDING TO FRONTEND")
+        print("="*80)
+        print(f"Status: {structured_response.get('status', 'success')}")
+        print(f"Response Count: {structured_response.get('response_count')}")
+        print(f"Message ID: {bot_message.id}")
+        print(f"Combined Message Length: {len(combined_message)} characters")
+        print(f"Media URLs: Images={len(all_media_urls.get('images', []))}, Videos={len(all_media_urls.get('videos', []))}")
+        print("="*80 + "\n")
+        
+        # Return structured response
         return ChatResponse(
-            status="success",
-            bot_response=final_message_content,
-            media_urls=urls,
-            message_id=bot_message.id
+            status=structured_response.get("status", "success"),
+            responses=structured_response.get("responses"),
+            response_count=structured_response.get("response_count"),
+            message_id=bot_message.id,
+            # Legacy fields for backward compatibility
+            bot_response=combined_message,
+            media_urls=all_media_urls if any(all_media_urls.values()) else None
         )
         
     except HTTPException:
@@ -742,13 +752,19 @@ async def get_chat_history(
             if msg.sender == "bot":
                 media_urls = extract_media_urls(msg.content)
             
-            response.append(MessageResponse(
+            message_response = MessageResponse(
                 message_id=msg.id,
                 content=msg.content,
                 sender=msg.sender,
                 timestamp=msg.timestamp,
                 media_urls=media_urls
-            ))
+            )
+            
+            # Add structured_response if available
+            if hasattr(msg, 'structured_response') and msg.structured_response:
+                message_response.structured_response = msg.structured_response
+            
+            response.append(message_response)
         
         return response
         

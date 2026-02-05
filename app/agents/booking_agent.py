@@ -146,8 +146,14 @@ Topic Scope:
 - Allowed: Searching, Availability, Booking, Payment, Booking management
 - If irrelevant: I can only help with farmhouse and hut bookings. Would you like help finding one?
 
-Quick actions:
-- If greeting detected → CALL: send_booking_intro()
+Greeting Detection:
+- If user says: "hi", "hello", "salam", "hey", "assalam" or similar greeting
+- OR if this is a new conversation with no previous messages
+- IMMEDIATELY CALL: send_booking_intro() tool
+- This tool will send a formatted introduction message
+- Do NOT manually write greeting responses, ALWAYS use the tool
+
+Creator Question:
 - If asked creator → Reply EXACTLY: I am a product of Prismify-Core.
 
 Security:
@@ -188,7 +194,18 @@ Property Mapping:
 - farmhouse → farm
 - hut → hut
 
-Supported Shifts: Day, Night, Full Day, Full Night
+Property Type Question:
+- When asking about property type, present as choice: "What type of property are you looking for? Farm or Hut?"
+- NEVER ask as open text - always present the two options
+
+Supported Property type: farmhouse, huts
+
+Supported Shifts (ALL 4 MUST BE INCLUDED):
+- Day
+- Night  
+- Full Day
+- Full Night
+CRITICAL: When asking about shift type, you MUST include ALL 4 options in the response. Never skip "Full Night"!
 
 Smart Recognition: Handle partial names, numeric selection, misspellings.
 
@@ -217,6 +234,30 @@ Date: {booking_date}
 Shift: {shift_type}
 Price: {min_price}-{max_price}
 Guests: {max_occupancy}
+
+CRITICAL BOOKING FLOW RULES:
+- **GREETING TOOL**: ALWAYS call send_booking_intro() tool when:
+  * User says: hi, hello, salam, hey, assalam, or any greeting
+  * OR it is a new chat with no conversation summary
+  * DO NOT write manual greeting responses - ALWAYS use the tool
+- **SHIFT TYPES**: When asking for shift type, ALWAYS include ALL 4 options: Day, Night, Full Day, Full Night
+  * NEVER skip "Full Night" option
+  * The formatter will create a dropdown with all 4 options
+- When user asks for property details/images → Show them WITHOUT asking booking questions
+- After showing details, ask: "Would you like to proceed with booking this farmhouse? or you want to explore"
+- ONLY ask for CNIC/name/booking details AFTER user explicitly confirms they want to book or ask them if they want to change their mind
+- User confirmation phrases: "yes", "book", "reserve", "I want it", "confirm", "book karo"
+- if user confirms then booking tool will be called and before that make sure details asked to call that tool
+- If user just browsing → Don't force booking questions
+- Let user explore freely before committing to book
+
+SESSION AWARENESS:
+- NEVER re-ask for information already in session (property_type, booking_date, shift_type, etc.)
+- If session has property_type → Don't ask again, use it
+- If session has booking_date → Don't ask again, use it
+- If session has shift_type → Don't ask again, use it
+- Only ask for MISSING/None information
+- Check session context before asking any questions
 """
 
 from sqlalchemy import desc
@@ -246,7 +287,7 @@ class BookingToolAgent:
             send_booking_intro
         ]
         
-        # Get LLM based on configuration
+        # Get LLM based on configuration (NO structured output here)
         self.llm = get_llm(temperature=0)
         
         # Get embedding function based on configuration
@@ -336,6 +377,10 @@ class BookingToolAgent:
         # ========================================
         messages = []
         
+        # Add conversation summary as context (if exists)
+        if memory_context.summary:
+            messages.append(("system", f"📝 Conversation Summary: {memory_context.summary}"))
+        
         # Add recent messages (last 4 only)
         for msg in memory_context.recent_messages:
             if msg["role"] == "user":
@@ -343,8 +388,7 @@ class BookingToolAgent:
             elif msg["role"] == "assistant":
                 messages.append(("assistant", msg["content"]))
         
-        # Format the system prompt with session context AND summary
-        # Include summary in system prompt for Gemini compatibility
+        # Format the system prompt with session context
         formatted_system_prompt = system_prompt.format(
             session_id=session_id,
             name=name,
@@ -357,10 +401,6 @@ class BookingToolAgent:
             max_occupancy=max_occupancy
         )
         
-        # Add conversation summary to system prompt if exists (Gemini-compatible)
-        if memory_context.summary:
-            formatted_system_prompt = f"{formatted_system_prompt}\n\n📝 **Conversation Summary**: {memory_context.summary}"
-        
         # Create a temporary prompt with the formatted system message
         temp_prompt = ChatPromptTemplate(
             [
@@ -369,17 +409,30 @@ class BookingToolAgent:
             ]
         )
         
-        # Create a temporary agent with the formatted prompt
+        # Create a temporary agent with the formatted prompt (NO structured output)
         temp_agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
             state_modifier=temp_prompt
         )
         
+        # Get regular response from agent
         response = temp_agent.invoke({
             "messages": messages,
         })
         
+        # Extract raw text response
+        raw_response = response["messages"][-1].content
+        
+        print("\n" + "="*80)
+        print("🤖 BOOKING AGENT - RAW OUTPUT")
+        print("="*80)
+        print(f"Response Type: {type(raw_response)}")
+        print(f"Response Length: {len(str(raw_response))} characters")
+        print(f"Response Content:")
+        print("-" * 80)
+        print(raw_response)
+        print("="*80 + "\n")
+        
         db.close()
-        print("Agent response:", response)
-        return response["messages"][-1].content
+        return raw_response
