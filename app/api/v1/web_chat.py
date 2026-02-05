@@ -40,6 +40,12 @@ from app.core.exceptions import (
 )
 from app.utils.formatters import formatting
 from app.utils.media_utils import extract_media_urls, remove_cloudinary_links
+from app.utils.form_utils import (
+    is_form_submission,
+    parse_form_submission,
+    has_questions,
+    mark_questions_as_submitted
+)
 from app.models.user import Session as SessionModel
 from app.models.booking import Booking
 
@@ -744,25 +750,42 @@ async def get_chat_history(
             oldest_first=True
         )
         
-        # Format response
+        # Format response with form submission handling
         response = []
-        for msg in messages:
+        for i, msg in enumerate(messages):
             # Extract media URLs if present in bot messages
             media_urls = None
             if msg.sender == "bot":
                 media_urls = extract_media_urls(msg.content)
+            
+            # Handle structured responses and form submissions
+            structured_response = None
+            if hasattr(msg, 'structured_response') and msg.structured_response:
+                structured_response = msg.structured_response
+                
+                # Check if this bot message has questions and if the next message is a form submission
+                if (msg.sender == "bot" and 
+                    has_questions(structured_response) and 
+                    i + 1 < len(messages) and 
+                    hasattr(messages[i + 1], 'is_form_submission') and 
+                    messages[i + 1].is_form_submission):
+                    
+                    # Mark questions as submitted with form data
+                    next_msg = messages[i + 1]
+                    if hasattr(next_msg, 'form_data') and next_msg.form_data:
+                        structured_response = mark_questions_as_submitted(
+                            structured_response, 
+                            next_msg.form_data
+                        )
             
             message_response = MessageResponse(
                 message_id=msg.id,
                 content=msg.content,
                 sender=msg.sender,
                 timestamp=msg.timestamp,
-                media_urls=media_urls
+                media_urls=media_urls,
+                structured_response=structured_response
             )
-            
-            # Add structured_response if available
-            if hasattr(msg, 'structured_response') and msg.structured_response:
-                message_response.structured_response = msg.structured_response
             
             response.append(message_response)
         
