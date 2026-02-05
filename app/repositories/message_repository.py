@@ -98,7 +98,10 @@ class MessageRepository(BaseRepository[Message]):
         sender: str,
         content: str,
         whatsapp_message_id: Optional[str] = None,
-        timestamp: Optional[datetime] = None
+        timestamp: Optional[datetime] = None,
+        structured_response: Optional[dict] = None,
+        form_data: Optional[dict] = None,
+        is_form_submission: bool = False
     ) -> Message:
         """
         Save a new message to the database.
@@ -110,6 +113,9 @@ class MessageRepository(BaseRepository[Message]):
             content: Message content/text
             whatsapp_message_id: Optional WhatsApp message ID for tracking
             timestamp: Optional custom timestamp (defaults to current UTC time)
+            structured_response: Optional structured response data for frontend
+            form_data: Optional form submission data
+            is_form_submission: Whether this message is a form submission
             
         Returns:
             Created Message instance
@@ -119,7 +125,10 @@ class MessageRepository(BaseRepository[Message]):
             "sender": sender,
             "content": content,
             "whatsapp_message_id": whatsapp_message_id,
-            "timestamp": timestamp or datetime.utcnow()
+            "timestamp": timestamp or datetime.utcnow(),
+            "structured_response": structured_response,
+            "form_data": form_data,
+            "is_form_submission": is_form_submission
         }
         
         return self.create(db, message_data)
@@ -234,3 +243,83 @@ class MessageRepository(BaseRepository[Message]):
             .limit(limit)
             .all()
         )
+    
+    def get_form_submissions(
+        self,
+        db: Session,
+        user_id,
+        limit: int = 50
+    ) -> List[Message]:
+        """
+        Retrieve form submissions for a user.
+        
+        Args:
+            db: Database session
+            user_id: User's unique identifier (UUID)
+            limit: Maximum number of form submissions to return
+            
+        Returns:
+            List of Message instances that are form submissions
+        """
+        return (
+            db.query(Message)
+            .filter(
+                Message.user_id == user_id,
+                Message.is_form_submission == True
+            )
+            .order_by(desc(Message.timestamp))
+            .limit(limit)
+            .all()
+        )
+    
+    def get_messages_with_structured_responses(
+        self,
+        db: Session,
+        user_id,
+        limit: int = 50
+    ) -> List[Message]:
+        """
+        Retrieve messages that have structured responses (like forms).
+        
+        Args:
+            db: Database session
+            user_id: User's unique identifier (UUID)
+            limit: Maximum number of messages to return
+            
+        Returns:
+            List of Message instances with structured responses
+        """
+        return (
+            db.query(Message)
+            .filter(
+                Message.user_id == user_id,
+                Message.structured_response.isnot(None)
+            )
+            .order_by(desc(Message.timestamp))
+            .limit(limit)
+            .all()
+        )
+    
+    def update_structured_response(
+        self,
+        db: Session,
+        message_id: int,
+        structured_response: dict
+    ) -> Optional[Message]:
+        """
+        Update the structured response of a message.
+        
+        Args:
+            db: Database session
+            message_id: Message ID to update
+            structured_response: New structured response data
+            
+        Returns:
+            Updated Message instance or None if not found
+        """
+        message = db.query(Message).filter(Message.id == message_id).first()
+        if message:
+            message.structured_response = structured_response
+            db.commit()
+            db.refresh(message)
+        return message

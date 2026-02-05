@@ -29,6 +29,8 @@ from app.agents.tools.property_tools import (
     get_property_id_from_name
 )
 
+from app.utils.form_utils import is_form_submission, parse_form_submission
+
 from app.agents.tools.payment_tools import (
     process_payment_screenshot,
     process_payment_details
@@ -303,7 +305,7 @@ class BookingToolAgent:
         self.agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            state_modifier=self.prompt
+            prompt=self.prompt
         )
 
   
@@ -330,12 +332,22 @@ class BookingToolAgent:
         user_id = session.user.user_id
 
         if incoming_text != "Image received run process_payment_screenshot":
+            # Check if this is a form submission
+            is_form = is_form_submission(incoming_text)
+            form_data = None
+            
+            if is_form:
+                form_data = parse_form_submission(incoming_text)
+                print(f"📝 Form submission detected: {form_data}")
+            
             db.add(Message(
                 user_id=user_id,
                 sender="user",
                 content=incoming_text,
-                whatsapp_message_id = whatsapp_message_id,
-                timestamp=datetime.utcnow()
+                whatsapp_message_id=whatsapp_message_id,
+                timestamp=datetime.utcnow(),
+                form_data=form_data,
+                is_form_submission=is_form
             ))
             db.commit()
 
@@ -413,7 +425,7 @@ class BookingToolAgent:
         temp_agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            state_modifier=temp_prompt
+            prompt=temp_prompt
         )
         
         # Get regular response from agent

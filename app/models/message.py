@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, JSON, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -15,6 +15,10 @@ class Message(Base):
     sender = Column(String(10))  # "user" or "bot"
     content = Column(Text)
     structured_response = Column(JSON, nullable=True)  # Store structured responses for frontend
+    
+    # Form submission fields
+    form_data = Column(JSON, nullable=True)  # Store submitted form answers
+    is_form_submission = Column(Boolean, default=False)  # Flag to identify form submissions
 
     timestamp = Column(DateTime, default=datetime.utcnow)
     whatsapp_message_id = Column(String(100), nullable=True)
