@@ -27,7 +27,7 @@ from app.repositories.session_repository import SessionRepository
 logger = logging.getLogger(__name__)
 
 
-@tool("list_properties", return_direct=True)
+@tool("list_properties")
 def list_properties(
     session_id: str,
     property_type: Optional[str] = None,
@@ -370,11 +370,11 @@ def get_property_media(session_id: str) -> str:
         db.close()
 
 
-@tool("get_property_images",return_direct=True)
+@tool("get_property_images")
 def get_property_images(session_id: str) -> str:
     """
-    CALL: user asks for images only
-    NO CALL: user asks for videos or both media
+    CALL: user asks for images only or media
+    NO CALL: user asks for videos or details
 
     REQ:
     • session_id with property_id
@@ -437,11 +437,11 @@ def get_property_images(session_id: str) -> str:
         db.close()
 
 
-@tool("get_property_videos",return_direct=True)
+@tool("get_property_videos")
 def get_property_videos(session_id: str) -> str:
     """
-    CALL: user asks for videos only
-    NO CALL: user asks for images or both media
+    CALL: user asks for videos only or media
+    NO CALL: user asks for images or details
 
     REQ:
     • session_id with property_id

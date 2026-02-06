@@ -78,6 +78,8 @@ class QuestionsResponse(BaseModel):
     type: ResponseType = Field(default=ResponseType.QUESTIONS, description="Response type")
     main_message: str = Field(description="Main message to display")
     questions: List[Question] = Field(description="List of questions to ask user")
+    show_cancel: bool = Field(default=False, description="Whether to show Cancel/Explore More button on form")
+    cancel_text: Optional[str] = Field(default="Not now", description="Text for cancel button")
     
     class Config:
         extra = "allow"  # Allow extra fields from LLM
@@ -181,8 +183,10 @@ ANALYZE the raw response and determine what type(s) of content it contains:
    - Extract each question with appropriate field type (date/choice/number/text/price_range)
    - Include all options for choice questions
    - Mark questions as required=true by default
-   - EXCEPTION: When asking for FINAL BOOKING CONFIRMATION details (name, CNIC, contact, etc.) → Mark ALL questions as required=false
-   - This allows users to change their mind and skip booking at the last step
+   - **BOOKING CONFIRMATION DETECTION**: If asking for CNIC, name, or contact for booking → Set show_cancel=true and cancel_text="Not now"
+   - This adds a "Not now" button to the entire form, allowing users to back out
+   - Detect patterns: "CNIC", "name for booking", "contact", "full name", "provide your", "questions_needed", "required_fields", "confirm your details"
+   - If raw response contains "questions_needed" or "required_fields" or "confirm your details" → This is a booking form, add "Not now" button
 
 3. **MEDIA** - When mentioning images, videos, or media URLs
    - Extract ALL image and video URLs into separate arrays
@@ -269,6 +273,40 @@ Output:
   ]
 }}
 
+Input: "To proceed with the booking, I need some details from you. Required fields: cnic, user_name"
+Output:
+{{
+  "responses": [
+    {{
+      "type": "questions",
+      "main_message": "To proceed with the booking, I need some details from you.",
+      "show_cancel": true,
+      "cancel_text": "Not now",
+      "questions": [
+        {{"id": "user_name", "text": "Your full name", "type": "text", "required": true}},
+        {{"id": "cnic", "text": "CNIC number", "type": "text", "required": true, "placeholder": "13 digits without dashes"}}
+      ]
+    }}
+  ]
+}}
+
+Input: "To proceed with booking, I need to confirm your details. 1. Your full name 2. Your CNIC number"
+Output:
+{{
+  "responses": [
+    {{
+      "type": "questions",
+      "main_message": "To proceed with booking, I need to confirm your details.",
+      "show_cancel": true,
+      "cancel_text": "Not now",
+      "questions": [
+        {{"id": "user_name", "text": "Your full name", "type": "text", "required": true}},
+        {{"id": "cnic", "text": "Your CNIC number", "type": "text", "required": true, "placeholder": "13 digits"}}
+      ]
+    }}
+  ]
+}}
+
 Input: "To confirm your booking, I need: 1. Your full name 2. CNIC number 3. Contact number"
 Output:
 {{
@@ -276,9 +314,11 @@ Output:
     {{
       "type": "questions",
       "main_message": "To confirm your booking, I need:",
+      "show_cancel": true,
+      "cancel_text": "Not now",
       "questions": [
-        {{"id": "customer_name", "text": "Your full name", "type": "text", "required": false}},
-        {{"id": "cnic", "text": "CNIC number", "type": "text", "required": false}},
+        {{"id": "customer_name", "text": "Your full name", "type": "text", "required": true}},
+        {{"id": "cnic", "text": "CNIC number", "type": "text", "required": true}},
         {{"id": "contact_number", "text": "Contact number", "type": "text", "required": false}}
       ]
     }}
@@ -463,6 +503,9 @@ IMPORTANT: ONLY extract information that is EXPLICITLY present in the raw respon
                     }
                     for q in response.questions
                 ]
+                formatted_response["show_cancel"] = response.show_cancel
+                if response.show_cancel:
+                    formatted_response["cancel_text"] = response.cancel_text
                 
             elif response.type == ResponseType.MEDIA:
                 formatted_response["media"] = {

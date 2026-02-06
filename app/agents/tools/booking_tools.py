@@ -23,7 +23,7 @@ from app.core.constants import EASYPAISA_NUMBER
 logger = logging.getLogger(__name__)
 
 
-@tool("create_booking", return_direct=True)
+@tool("create_booking")
 def create_booking(
     session_id: str,
     booking_date: str,
@@ -32,24 +32,37 @@ def create_booking(
     user_name: Optional[str] = None
 ) -> dict:
     """
-    Create booking.
+    Create booking after user confirmation.
 
-    CALL: property_id + date + shift + intent
-    NO CALL: browse | compare | price | availability
+    CALL: User confirms + has CNIC/name (in DB or provided)
+    NO CALL: Browsing | Exploring | No confirmation
 
     REQ:
     • booking_date YYYY-MM-DD future
     • shift_type Day|Night|Full Day|Full Night
     • property_id in session
+    • User confirmed booking
 
-    SENSITIVE: CNIC collect post-intent, never echo
+    PARAMS:
+    • cnic - Optional, uses DB if not provided
+    • user_name - Optional, uses DB if not provided
 
     RETURNS:
-    ok {booking_reference, payment_amount, payment_instructions}
-    err {error}
+    success {message} - Booking created with payment info
+    error {error} - Availability/validation errors
     """
     db = SessionLocal()
     try:
+        print("\n" + "="*80)
+        print("🔧 CREATE_BOOKING TOOL CALLED")
+        print("="*80)
+        print(f"Session ID: {session_id}")
+        print(f"Booking Date: {booking_date}")
+        print(f"Shift Type: {shift_type}")
+        print(f"CNIC provided: {bool(cnic)}")
+        print(f"User Name provided: {bool(user_name)}")
+        print("="*80 + "\n")
+        
         # Get session to find user and property
         session_repo = SessionRepository()
         session = session_repo.get_by_id(db, session_id)
@@ -90,8 +103,20 @@ def create_booking(
         
         # Return message or error
         if result.get("success"):
+            print("\n" + "="*80)
+            print("✅ CREATE_BOOKING TOOL - SUCCESS")
+            print("="*80)
+            print(f"Booking ID: {result.get('booking_id')}")
+            print(f"Message length: {len(result.get('message', ''))}")
+            print("="*80 + "\n")
             return {"message": result["message"]}
         else:
+            print("\n" + "="*80)
+            print("❌ CREATE_BOOKING TOOL - ERROR")
+            print("="*80)
+            print(f"Error: {result.get('error')}")
+            print("="*80 + "\n")
+            # All errors from service are actual errors (availability, validation, missing data, etc.)
             return {"error": result.get("error", "Failed to create booking")}
         
     except Exception as e:
@@ -119,13 +144,26 @@ def check_booking_status(booking_id: str) -> dict:
     """
     db = SessionLocal()
     try:
+        print("\n" + "="*80)
+        print("🔧 CHECK_BOOKING_STATUS TOOL CALLED")
+        print("="*80)
+        print(f"Booking ID (raw): '{booking_id}'")
+        print("="*80 + "\n")
+        
         booking_id = booking_id.strip()
+        
+        print(f"Booking ID (stripped): '{booking_id}'")
         
         # Check booking status using service
         booking_service = BookingService()
         result = booking_service.check_booking_status(db, booking_id)
         
         if not result.get("success"):
+            print("\n" + "="*80)
+            print("❌ CHECK_BOOKING_STATUS - NOT FOUND")
+            print("="*80)
+            print(f"Error: {result.get('error')}")
+            print("="*80 + "\n")
             return {"error": result.get("error", "Booking not found. Please check your booking ID.")}
         
         booking = result["booking"]
@@ -275,6 +313,12 @@ def get_payment_instructions(booking_id: str) -> dict:
     """
     db = SessionLocal()
     try:
+        print("\n" + "="*80)
+        print("🔧 GET_PAYMENT_INSTRUCTIONS TOOL CALLED")
+        print("="*80)
+        print(f"Booking ID (raw): '{booking_id}'")
+        print("="*80 + "\n")
+        
         booking_id = booking_id.strip()
         
         # Check booking status using service

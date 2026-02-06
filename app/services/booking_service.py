@@ -135,25 +135,33 @@ class BookingService:
                     "error": "Please provide your full name for booking"
                 }
             
-            # Update user information if provided
-            if cnic and not user.cnic:
+            # Update user information if provided and different from existing
+            updated = False
+            
+            if cnic:
                 # Remove dashes from CNIC
-                cnic = cnic.replace("-", "")
+                cnic_clean = cnic.replace("-", "")
                 
                 # Validate CNIC length
-                if len(cnic) != CNIC_LENGTH:
+                if len(cnic_clean) != CNIC_LENGTH:
                     return {
                         "success": False,
                         "error": f"Please enter {CNIC_LENGTH} digit CNIC"
                     }
                 
-                user.cnic = cnic
+                # Only update if different from existing
+                if user.cnic != cnic_clean:
+                    user.cnic = cnic_clean
+                    updated = True
             
-            if user_name and not user.name:
-                user.name = user_name
+            if user_name:
+                # Only update if different from existing
+                if user.name != user_name:
+                    user.name = user_name
+                    updated = True
             
-            # Commit user updates
-            if cnic or user_name:
+            # Commit user updates only if something changed
+            if updated:
                 db.commit()
                 db.refresh(user)
             

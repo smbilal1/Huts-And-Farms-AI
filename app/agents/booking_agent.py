@@ -225,18 +225,6 @@ You MUST:
 - Keep replies short
 - Prioritize booking completion
 
-SESSION CONTEXT
-Session: {session_id}
-User: {name}
-Date: {date}
-
-Search:
-Type: {property_type}
-Date: {booking_date}
-Shift: {shift_type}
-Price: {min_price}-{max_price}
-Guests: {max_occupancy}
-
 CRITICAL BOOKING FLOW RULES:
 - **GREETING TOOL**: ALWAYS call send_booking_intro() tool when:
   * User says: hi, hello, salam, hey, assalam, or any greeting
@@ -244,14 +232,26 @@ CRITICAL BOOKING FLOW RULES:
   * DO NOT write manual greeting responses - ALWAYS use the tool
 - **SHIFT TYPES**: When asking for shift type, ALWAYS include ALL 4 options: Day, Night, Full Day, Full Night
   * NEVER skip "Full Night" option
-  * The formatter will create a dropdown with all 4 options
+ 
 - When user asks for property details/images → Show them WITHOUT asking booking questions
 - After showing details, ask: "Would you like to proceed with booking this farmhouse? or you want to explore"
-- ONLY ask for CNIC/name/booking details AFTER user explicitly confirms they want to book or ask them if they want to change their mind
-- User confirmation phrases: "yes", "book", "reserve", "I want it", "confirm", "book karo"
-- if user confirms then booking tool will be called and before that make sure details asked to call that tool
-- If user just browsing → Don't force booking questions
-- Let user explore freely before committing to book
+
+**BOOKING CONFIRMATION FLOW (CRITICAL):**
+1. When user shows booking intent ("booking hosakti?", "can I book?", "book karna hai") → Ask:
+   "Ready to book [Property Name] for [Date] [Shift]? (Yes/No)"
+2. ONLY proceed AFTER user confirms: "yes", "book", "reserve", "confirm", "book karo", "haan", "ji"
+3. When user confirms:
+   - Check SESSION CONTEXT for user_name and user_cnic
+   - ALWAYS ask for BOTH name and CNIC as SEPARATE fields (even if they exist)
+   - Say: "To proceed with booking, I need to confirm your details."
+   - Ask two separate questions:
+     * "Your full name" (pre-filled with {name} from session if not "None")
+     * "Your CNIC number" (pre-filled with {cnic} from session if not "None")
+   - User can edit pre-filled values or fill empty ones
+   - After response → Call create_booking(cnic=input, user_name=input)
+4. Always show the current name and cnic values if they exist in session data
+5. If browsing → Don't force booking
+
 
 SESSION AWARENESS:
 - NEVER re-ask for information already in session (property_type, booking_date, shift_type, etc.)
@@ -260,6 +260,19 @@ SESSION AWARENESS:
 - If session has shift_type → Don't ask again, use it
 - Only ask for MISSING/None information
 - Check session context before asking any questions
+
+**SESSION CONTEXT**
+Session: {session_id}
+User: {name}
+User CNIC: {cnic}
+Date: {date}
+
+Search:
+Type: {property_type}
+Date: {booking_date}
+Shift: {shift_type}
+Price: {min_price}-{max_price}
+Guests: {max_occupancy}
 """
 
 from sqlalchemy import desc
@@ -305,7 +318,7 @@ class BookingToolAgent:
         self.agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=self.prompt
+            state_modifier=self.prompt
         )
 
   
@@ -371,9 +384,9 @@ class BookingToolAgent:
         # ========================================
         # Extract session context for prompt
         # ========================================
-        cnic = session.user.cnic if session else "None"
-        name = session.user.name if session else "None"
-        client_email = session.user.email if session else "unauthenticated"
+        cnic = session.user.cnic if session and session.user else "None"
+        name = session.user.name if session and session.user else "None"
+        client_email = session.user.email if session and session.user else "unauthenticated"
         property_type = memory_context.session_state.get('property_type') or "None"
         booking_date = memory_context.session_state.get('booking_date') or "None"
         shift_type = memory_context.session_state.get('shift_type') or "None"
@@ -381,8 +394,12 @@ class BookingToolAgent:
         max_price = memory_context.session_state.get('max_price') or "None"
         max_occupancy = memory_context.session_state.get('max_occupancy') or "None"
         
-        print(f"client email : {client_email}")
-        print(incoming_text)
+        print(f"\n👤 User Context:")
+        print(f"  - Name: {name}")
+        print(f"  - CNIC: {cnic}")
+        print(f"  - Email: {client_email}")
+        
+        print(f"\nIncoming message: {incoming_text}")
         
         # ========================================
         # Format messages for agent
@@ -404,6 +421,7 @@ class BookingToolAgent:
         formatted_system_prompt = system_prompt.format(
             session_id=session_id,
             name=name,
+            cnic=cnic if cnic else "None",
             date=date.today().isoformat(),
             property_type=property_type,
             booking_date=booking_date,
@@ -425,13 +443,42 @@ class BookingToolAgent:
         temp_agent = create_react_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=temp_prompt
+            state_modifier=temp_prompt
         )
         
         # Get regular response from agent
+        print("\n" + "="*80)
+        print("🔧 CALLING AGENT WITH TOOLS")
+        print("="*80)
+        print(f"Available tools: {[tool.name for tool in self.tools]}")
+        print(f"Message count: {len(messages)}")
+        print("="*80 + "\n")
+        
         response = temp_agent.invoke({
             "messages": messages,
         })
+        
+        # Log all messages in the response (including tool calls)
+        print("\n" + "="*80)
+        print("🔍 AGENT EXECUTION TRACE")
+        print("="*80)
+        for idx, msg in enumerate(response["messages"]):
+            msg_type = type(msg).__name__
+            print(f"\n[{idx}] Message Type: {msg_type}")
+            
+            if hasattr(msg, 'content'):
+                content_preview = str(msg.content)[:200] if msg.content else "None"
+                print(f"    Content: {content_preview}...")
+            
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                print(f"    Tool Calls: {len(msg.tool_calls)}")
+                for tool_call in msg.tool_calls:
+                    print(f"      - Tool: {tool_call.get('name', 'unknown')}")
+                    print(f"        Args: {tool_call.get('args', {})}")
+            
+            if hasattr(msg, 'name'):
+                print(f"    Tool Name: {msg.name}")
+        print("="*80 + "\n")
         
         # Extract raw text response
         raw_response = response["messages"][-1].content

@@ -31,7 +31,7 @@ def _get_notification_service() -> NotificationService:
     return NotificationService()
 
 
-@tool("process_payment_screenshot", return_direct=True)
+@tool("process_payment_screenshot")
 def process_payment_screenshot(booking_id: str = None) -> dict:
     """
     Process payment screenshot.
