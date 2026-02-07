@@ -183,10 +183,12 @@ ANALYZE the raw response and determine what type(s) of content it contains:
    - Extract each question with appropriate field type (date/choice/number/text/price_range)
    - Include all options for choice questions
    - Mark questions as required=true by default
-   - **BOOKING CONFIRMATION DETECTION**: If asking for CNIC, name, or contact for booking → Set show_cancel=true and cancel_text="Not now"
-   - This adds a "Not now" button to the entire form, allowing users to back out
-   - Detect patterns: "CNIC", "name for booking", "contact", "full name", "provide your", "questions_needed", "required_fields", "confirm your details"
-   - If raw response contains "questions_needed" or "required_fields" or "confirm your details" → This is a booking form, add "Not now" button
+   - **BOOKING DETAILS DETECTION**: If asking for name, CNIC, or contact details for booking:
+     * Check for keywords: "user_name", "cnic", "contact", "full name", "CNIC number", "questions_needed", "required_fields", "confirm your details", "booking details"
+     * If NEW USER (no existing details) → Set show_cancel=false (must provide details)
+     * If EXISTING USER (confirming/editing) → Set show_cancel=true with cancel_text="Cancel"
+   - Detect patterns: "To proceed with booking", "confirm your details", "edit your details"
+   - If questions include "action" with options "Confirm and Book" or "Edit Details" → This is confirmation, show_cancel=false
 
 3. **MEDIA** - When mentioning images, videos, or media URLs
    - Extract ALL image and video URLs into separate arrays
@@ -280,8 +282,7 @@ Output:
     {{
       "type": "questions",
       "main_message": "To proceed with the booking, I need some details from you.",
-      "show_cancel": true,
-      "cancel_text": "Not now",
+      "show_cancel": false,
       "questions": [
         {{"id": "user_name", "text": "Your full name", "type": "text", "required": true}},
         {{"id": "cnic", "text": "CNIC number", "type": "text", "required": true, "placeholder": "13 digits without dashes"}}
@@ -297,8 +298,7 @@ Output:
     {{
       "type": "questions",
       "main_message": "To proceed with booking, I need to confirm your details.",
-      "show_cancel": true,
-      "cancel_text": "Not now",
+      "show_cancel": false,
       "questions": [
         {{"id": "user_name", "text": "Your full name", "type": "text", "required": true}},
         {{"id": "cnic", "text": "Your CNIC number", "type": "text", "required": true, "placeholder": "13 digits"}}
@@ -307,19 +307,50 @@ Output:
   ]
 }}
 
-Input: "To confirm your booking, I need: 1. Your full name 2. CNIC number 3. Contact number"
+Input: "Please confirm your booking details: Name: Ahmed Ali, CNIC: 12345-6789012-3. What would you like to do? Options: Confirm and Book, Edit Details"
 Output:
 {{
   "responses": [
     {{
       "type": "questions",
-      "main_message": "To confirm your booking, I need:",
-      "show_cancel": true,
-      "cancel_text": "Not now",
+      "main_message": "Please confirm your booking details:\\n\\n👤 Name: Ahmed Ali\\n🆔 CNIC: 12345-6789012-3",
+      "show_cancel": false,
       "questions": [
-        {{"id": "customer_name", "text": "Your full name", "type": "text", "required": true}},
-        {{"id": "cnic", "text": "CNIC number", "type": "text", "required": true}},
-        {{"id": "contact_number", "text": "Contact number", "type": "text", "required": false}}
+        {{"id": "action", "text": "What would you like to do?", "type": "choice", "required": true, "options": ["Confirm and Book", "Edit Details"]}}
+      ]
+    }}
+  ]
+}}
+
+Input: "Edit your details below: 1. Your full name (current: Ahmed Ali) 2. Your CNIC number (current: 1234567890123)"
+Output:
+{{
+  "responses": [
+    {{
+      "type": "questions",
+      "main_message": "Edit your details below:",
+      "show_cancel": true,
+      "cancel_text": "Cancel",
+      "questions": [
+        {{"id": "user_name", "text": "Your full name", "type": "text", "required": true, "placeholder": "Ahmed Ali", "default_value": "Ahmed Ali"}},
+        {{"id": "cnic", "text": "Your CNIC number", "type": "text", "required": true, "placeholder": "1234567890123", "default_value": "1234567890123"}}
+      ]
+    }}
+  ]
+}}
+
+Input: "❌ CNIC must be exactly 13 digits. Please correct below: 1. Your full name 2. Your CNIC number"
+Output:
+{{
+  "responses": [
+    {{
+      "type": "questions",
+      "main_message": "❌ CNIC must be exactly 13 digits. Please correct below:",
+      "show_cancel": true,
+      "cancel_text": "Cancel",
+      "questions": [
+        {{"id": "user_name", "text": "Your full name", "type": "text", "required": true, "placeholder": "e.g., Ahmed Ali", "default_value": "Billu"}},
+        {{"id": "cnic", "text": "Your CNIC number", "type": "text", "required": true, "placeholder": "13 digits without dashes", "default_value": "421011234567"}}
       ]
     }}
   ]

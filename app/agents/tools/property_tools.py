@@ -504,38 +504,193 @@ def get_property_videos(session_id: str) -> str:
         db.close()
 
 
+# Generic terms that should NOT be used for primary matching
+GENERIC_TERMS = {
+    # Property types
+    'farmhouse', 'farm', 'hut', 'house', 'resort', 
+    'villa', 'cottage', 'property', 'place',
+    
+    # Cities (add all your cities)
+    'karachi', 'lahore', 'islamabad', 'rawalpindi', 
+    'multan', 'faisalabad', 'peshawar', 'quetta',
+    
+    # Common words
+    'the', 'a', 'an', 'and', 'or', 'in', 'at', 'on'
+}
+
+
+def _classify_words(text: str) -> tuple:
+    """
+    Classify words as significant or generic using fuzzy matching.
+    
+    Args:
+        text: Input text to classify
+        
+    Returns:
+        Tuple of (significant_words, generic_words)
+    """
+    words = text.lower().split()
+    significant = []
+    generic = []
+    
+    for word in words:
+        is_generic = False
+        
+        # Fuzzy match against generic terms (0.7 threshold)
+        for generic_term in GENERIC_TERMS:
+            ratio = SequenceMatcher(None, word, generic_term).ratio()
+            if ratio >= 0.7:
+                generic.append(word)
+                is_generic = True
+                break
+        
+        if not is_generic:
+            significant.append(word)
+    
+    return significant, generic
+
+
 def _fuzzy_match_property_name(search_name: str, property_names: List[Dict]) -> Optional[Dict]:
     """
-    Perform fuzzy matching on property names.
+    Multi-stage fuzzy matching with tiebreaker and user confirmation.
+    
+    Algorithm:
+    1. Separate user input word by word
+    2. Fuzzy match each word with GENERIC_TERMS (threshold 0.7)
+    3. Classify words as significant or generic
+    4. Match user significant words with property significant words (threshold 0.6)
+    5. If multiple properties match:
+       a. Use generic words as tiebreaker
+       b. If still tied, return multiple options for user confirmation
     
     Args:
         search_name: The name to search for
         property_names: List of dicts with 'name', 'property_id', 'city', 'type'
         
     Returns:
-        Best matching property dict or None if no match above threshold
+        - Single property dict if clear match
+        - Dict with 'multiple_matches' key if ambiguous
+        - None if no match
+        
+    Examples:
+        "Seaside" → Matches "Seaside Farmhouse Karachi" ✅
+        "Saeisde" → Matches "Seaside Farmhouse Karachi" ✅ (typo)
+        "Karachi" → No match ❌ (generic term)
+        "karcahi" → No match ❌ (typo of generic term)
+        "Seaside Karachi" → Uses "Karachi" as tiebreaker if multiple "Seaside" properties
     """
-    search_name_lower = search_name.lower().strip()
-    matches = []
+    # STEP 1 & 2: Classify user words
+    user_significant, user_generic = _classify_words(search_name)
     
-    for prop in property_names:
-        prop_name_lower = prop['name'].lower().strip()
-        
-        # Calculate similarity ratio
-        ratio = SequenceMatcher(None, search_name_lower, prop_name_lower).ratio()
-        
-        if ratio >= 0.6:  # Threshold of 0.6
-            matches.append({
-                'property': prop,
-                'ratio': ratio
-            })
-    
-    if not matches:
+    # If no significant words, return None
+    if not user_significant:
+        logger.info(f"Search '{search_name}' contains only generic terms")
         return None
     
-    # Sort by ratio (highest first) and return the top match
-    matches.sort(key=lambda x: x['ratio'], reverse=True)
-    return matches[0]['property']
+    logger.info(f"User significant: {user_significant}, generic: {user_generic}")
+    
+    # STEP 3 & 4: Score each property based on significant words
+    candidates = []
+    
+    for prop in property_names:
+        prop_name = prop['name']
+        prop_significant, prop_generic = _classify_words(prop_name)
+        
+        if not prop_significant:
+            continue
+        
+        # Match user significant with property significant
+        significant_score = 0
+        matched_count = 0
+        matched_words = []
+        
+        for user_word in user_significant:
+            best_ratio = 0
+            best_matched_word = None
+            
+            for prop_word in prop_significant:
+                ratio = SequenceMatcher(None, user_word, prop_word).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_matched_word = prop_word
+            
+            if best_ratio >= 0.6:
+                significant_score += best_ratio
+                matched_count += 1
+                matched_words.append(best_matched_word)
+        
+        # Only consider if at least one significant word matched
+        if matched_count > 0:
+            # Normalize by number of user significant words
+            normalized_score = significant_score / len(user_significant)
+            
+            candidates.append({
+                'property': prop,
+                'significant_score': normalized_score,
+                'matched_count': matched_count,
+                'matched_words': matched_words,
+                'prop_generic': prop_generic,
+                'prop_significant': prop_significant
+            })
+            logger.info(f"Property '{prop_name}' scored {normalized_score:.2f} (matched: {matched_words})")
+    
+    if not candidates:
+        logger.info(f"No matches found for '{search_name}'")
+        return None
+    
+    # STEP 5: Check for ties
+    # Sort by significant score
+    candidates.sort(key=lambda x: (x['significant_score'], x['matched_count']), reverse=True)
+    
+    # Get top score
+    top_score = candidates[0]['significant_score']
+    
+    # Find all candidates with top score (within 0.05 tolerance for ties)
+    top_candidates = [c for c in candidates if abs(c['significant_score'] - top_score) < 0.05]
+    
+    # If only one top candidate, return it
+    if len(top_candidates) == 1:
+        logger.info(f"Single match: {top_candidates[0]['property']['name']}")
+        return top_candidates[0]['property']
+    
+    # STEP 6: Tiebreaker using generic words
+    if user_generic:
+        logger.info(f"Tie detected ({len(top_candidates)} properties), using generic words as tiebreaker")
+        
+        for candidate in top_candidates:
+            generic_score = 0
+            
+            for user_gen in user_generic:
+                best_ratio = 0
+                for prop_gen in candidate['prop_generic']:
+                    ratio = SequenceMatcher(None, user_gen, prop_gen).ratio()
+                    best_ratio = max(best_ratio, ratio)
+                
+                if best_ratio >= 0.6:
+                    generic_score += best_ratio
+            
+            candidate['generic_score'] = generic_score
+            logger.info(f"  {candidate['property']['name']}: generic score = {generic_score:.2f}")
+        
+        # Sort by generic score
+        top_candidates.sort(key=lambda x: x.get('generic_score', 0), reverse=True)
+        
+        # Check if we have a clear winner (difference > 0.1)
+        if len(top_candidates) > 1:
+            if top_candidates[0].get('generic_score', 0) - top_candidates[1].get('generic_score', 0) > 0.1:
+                logger.info(f"Winner by generic match: {top_candidates[0]['property']['name']}")
+                return top_candidates[0]['property']
+        elif top_candidates[0].get('generic_score', 0) > 0:
+            logger.info(f"Winner by generic match: {top_candidates[0]['property']['name']}")
+            return top_candidates[0]['property']
+    
+    # STEP 7: Still tied - return multiple options for user confirmation
+    logger.info(f"Multiple matches found ({len(top_candidates)}), need user confirmation")
+    return {
+        'multiple_matches': True,
+        'properties': [c['property'] for c in top_candidates[:3]]  # Max 3 options
+    }
+
 
 
 @tool("get_property_id_from_name")

@@ -20,6 +20,10 @@ from app.agents.tools.booking_tools import (
     get_user_bookings
 )
 
+from app.agents.tools.booking_details_tools import (
+    prepare_booking_details
+)
+
 from app.agents.tools.property_tools import (
     list_properties,
     get_property_pricing,
@@ -240,17 +244,31 @@ CRITICAL BOOKING FLOW RULES:
 1. When user shows booking intent ("booking hosakti?", "can I book?", "book karna hai") → Ask:
    "Ready to book [Property Name] for [Date] [Shift]? (Yes/No)"
 2. ONLY proceed AFTER user confirms: "yes", "book", "reserve", "confirm", "book karo", "haan", "ji"
-3. When user confirms:
-   - Check SESSION CONTEXT for user_name and user_cnic
-   - ALWAYS ask for BOTH name and CNIC as SEPARATE fields (even if they exist)
-   - Say: "To proceed with booking, I need to confirm your details."
-   - Ask two separate questions:
-     * "Your full name" (pre-filled with {name} from session if not "None")
-     * "Your CNIC number" (pre-filled with {cnic} from session if not "None")
-   - User can edit pre-filled values or fill empty ones
-   - After response → Call create_booking(cnic=input, user_name=input)
-4. Always show the current name and cnic values if they exist in session data
-5. If browsing → Don't force booking
+3. When user confirms booking:
+   **STEP 1: ALWAYS call prepare_booking_details(session_id) FIRST**
+   - This tool checks if user has name and CNIC
+   - Returns questions if missing or confirmation choice if exists
+   - NEVER skip this step!
+   
+   **STEP 2: Show tool response to user EXACTLY as returned**
+   - Use ONLY the message and questions from tool response
+   - DO NOT add extra text, explanations, or options
+   - DO NOT show current booking details when there are validation errors
+   - DO NOT add confirmation options when tool returns edit form
+   - Let the tool handle ALL messaging
+   
+   **STEP 3: Call prepare_booking_details again with user input**
+   - Pass user_name, cnic, or action based on user response
+   - Tool will validate and save details
+   - If validation fails, tool returns edit form again - show it WITHOUT adding extra text
+   
+   **STEP 4: ONLY when tool returns ready=true → Call create_booking**
+   - create_booking(session_id, booking_date, shift_type)
+   - NO need to pass cnic/user_name - already saved by prepare_booking_details!
+   
+   **NEVER call create_booking without prepare_booking_details returning ready=true!**
+
+4. If browsing → Don't force booking
 
 
 SESSION AWARENESS:
@@ -291,6 +309,7 @@ class BookingToolAgent:
             get_property_images,
             get_property_videos,
             get_property_id_from_name,
+            prepare_booking_details,
             create_booking,
             check_booking_status,
             process_payment_screenshot,

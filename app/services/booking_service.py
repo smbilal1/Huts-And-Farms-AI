@@ -210,6 +210,10 @@ class BookingService:
             # Create booking ID
             booking_id = f"{user.name}-{booking_date.strftime('%Y-%m-%d')}-{shift_type}"
             
+            # Format contact details for storage
+            formatted_cnic = f"{user.cnic[:5]}-{user.cnic[5:12]}-{user.cnic[12]}" if user.cnic and len(user.cnic) == 13 else user.cnic
+            contact_details = f"Name: {user.name}, CNIC: {formatted_cnic}"
+            
             # Create booking
             booking_data = {
                 "booking_id": booking_id,
@@ -220,6 +224,7 @@ class BookingService:
                 "total_cost": float(pricing.price),
                 "booking_source": booking_source,
                 "status": "Pending",
+                "contact_details": contact_details,
                 "booked_at": datetime.utcnow(),
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
